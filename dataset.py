@@ -9,7 +9,7 @@ from tqdm import tqdm
 from torch.utils.data import Dataset
 from utils.general import get_rally_dirs, get_match_median
 
-data_dir = '/train-data2/qaz812345/TrackNetV3/data'
+data_dir = ''
 
 class Shuttlecock_Trajectory_Dataset(Dataset):
     def __init__(self,
@@ -27,6 +27,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         debug=False
     ):
         """ Shuttlecock_Trajectory_Dataset: https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw
+
             args:
                 root_dir - A str of root directory path of dataset
                 split - A str specifying the split mode, 'train', 'test', 'val'
@@ -36,7 +37,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 bg_mode - A str specifying the background mode for TrackNet training, '', 'subtract', 'subtract_concat', 'concat'
                 frame_alpha - A float specifying the alpha value of Beta distribution for frame mixup, -1 means no frame mixup
                 rally_i - A int specifying the index of rally
-                rally_dir - A str of frame directory path with format <split>/match<match_id>/frame/<rally_id>
+                rally_dir - A str of frame directory path with format <data_dir>/<split>/match<match_id>/frame/<rally_id>
                 frame_list - A list of images for TrackNet inference
                 pred_dict - A dict of prediction results of TrackNet for InpaintNet inference
                 debug - A bool specifying whether to use debug mode
@@ -67,18 +68,18 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         self.pred_dict = pred_dict
 
         # Initialize the input data
-        if rally_dir:
+        if rally_dir is not None:
             if self.data_mode == 'heatmap':
                 self.data_idxs, self.frame_files, self.coordinates, self.visibility = self._gen_input_from_rally_dir(rally_i, rally_dir)
             else:
                 self.data_idxs, self.coordinates, self.pred_coordinates, self.visibility, self.pred_visibility, self.inpaint_mask = self._gen_input_from_rally_dir(rally_i, rally_dir)
-        elif self.frame_list:
+        elif self.frame_list is not None:
             assert self.data_mode == 'heatmap'
             self.frame_list = np.array(frame_list)
             self.data_idxs = self._gen_input_from_frame_list()
             if self.bg_mode:
                 self.median = np.median(np.array(frame_list), 0)
-        elif self.pred_dict:
+        elif self.pred_dict is not None:
             assert self.data_mode == 'coordinate'
             self.data_idxs, self.pred_coordinates, self.pred_visibility, self.inpaint_mask = self._gen_input_from_pred_dict()
         else:
@@ -103,8 +104,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                     self.coordinates = data_dict['coordinates'][:num_data]
                     self.pred_coordinates = data_dict['pred_coordinates'][:num_data]
                     self.visibility = data_dict['visibility'][:num_data]
-                    self.pred_visibility = data_dict['pred_visibility'][:num_debug]
-                    self.inpaint_mask = data_dict['inpaint_mask'][:num_debug]
+                    self.pred_visibility = data_dict['pred_visibility'][:num_data]
+                    self.inpaint_mask = data_dict['inpaint_mask'][:num_data]
             else:
                 if self.data_mode == 'heatmap':
                     self.data_idxs = data_dict['data_idx']                  # (N, F, 2)
@@ -132,13 +133,11 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             for rally_i, rally_dir in enumerate(tqdm(rally_dirs)):
                 rally_dir = os.path.join(self.root_dir, rally_dir)
                 tmp_idx, tmp_frames, tmp_coor, tmp_vis = self._gen_input_from_rally_dir(rally_i, rally_dir)
-                print(tmp_idx.shape, tmp_frames.shape, tmp_coor.shape, tmp_vis.shape)
+                
                 data_idx = np.concatenate((data_idx, tmp_idx), axis=0)
                 frame_files = np.concatenate((frame_files, tmp_frames), axis=0)
                 coordinates = np.concatenate((coordinates, tmp_coor), axis=0)
                 visibility = np.concatenate((visibility, tmp_vis), axis=0)
-
-            print(data_idx.shape, frame_files.shape, coordinates.shape, visibility.shape)
             
             np.savez(self.input_file,
                     data_idx=data_idx,
@@ -173,12 +172,13 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                     inpaint_mask=inpaint_mask)
 
     def _gen_input_from_rally_dir(self, rally_i, rally_dir):
+        assert os.path.exists(rally_dir) and 'frame' in rally_dir
         match_dir, rally_id = parse.parse('{}/frame/{}', rally_dir)
         if self.data_mode == 'coordinate':
             csv_file = os.path.join(match_dir, 'predicted_csv', f'{rally_id}_ball.csv')
         else:
             if 'test' in rally_dir:
-                csv_file = os.path.join(match_dir, 'correct_csv', f'{rally_id}_ball.csv')
+                csv_file = os.path.join(match_dir, 'corrected_csv', f'{rally_id}_ball.csv')
             else:
                 csv_file = os.path.join(match_dir, 'csv', f'{rally_id}_ball.csv')
         
@@ -265,13 +265,13 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             return data_idx, coordinates, pred_coordinates, visibility, pred_visibility, inpaint_mask
 
     def _gen_input_from_frame_list(self):
-        data_idx = np.array([], dtype=np.int32).reshape(0, self.seq_len, 2)
+        data_idx = np.array([], dtype=np.int32).reshape(0, self.seq_len)
 
         for i in range(0, len(self.frame_list)-self.seq_len+1, self.sliding_step):
             tmp_idx = []
             # Construct a single input sequence
             for f in range(self.seq_len):
-                tmp_idx.append((0, i+f))
+                tmp_idx.append(i+f)
 
             # Append the input sequence
             data_idx = np.concatenate((data_idx, [tmp_idx]), axis=0)
@@ -284,7 +284,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         pred_visibility = np.array([], dtype=np.float32).reshape(0, self.seq_len)
         inpaint_mask = np.array([], dtype=np.float32).reshape(0, self.seq_len)
         x_pred, y_pred, vis_pred = self.pred_dict['X_pred'], self.pred_dict['Y_pred'], self.pred_dict['Visibility_pred']
-        inpaint = self.pred_dict['Inpainting']
+        inpaint = self.pred_dict['Inpaint']
         assert len(x_pred) == len(y_pred) == len(vis_pred) == len(inpaint)
 
         # Sliding on the frame sequence
@@ -322,7 +322,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
     def __getitem__(self, idx):
         if self.frame_list is not None:
             data_idx = self.data_idxs[idx]
-            imgs = self.frame_list[data_idx[:, 1]]
+            imgs = self.frame_list[data_idx]
             frames = np.array([]).reshape(0, self.HEIGHT, self.WIDTH)
 
             # Get the resize scaler
@@ -361,7 +361,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             # Normalization
             frames /= 255.
 
-            return data_idx, frames
+            return frames
 
         elif self.pred_dict is not None:
             pred_coors = self.pred_coordinates[idx] # (F, 2)
@@ -563,30 +563,3 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             return data_idx, pred_coors, coors, vis_pred.reshape(-1, 1), vis.reshape(-1, 1), inpaint.reshape(-1, 1)
         else:
             raise NotImplementedError
-
-'''
-# Debug
-from torch.utils.data import DataLoader
-from dataset import Shuttlecock_Trajectory_Dataset
-split = 'test'
-
-seq_len = 8
-batch_size = 10
-
-for bg_mode in ['', 'subtract', 'subtract_concat', 'concat']:
-    for frame_alpha in [-1, 0.5]:
-        dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=seq_len, sliding_step=1, data_mode='heatmap', bg_mode=bg_mode, frame_alpha=frame_alpha)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
-        data_iter = iter(loader)
-        i, x, y, c, v = next(data_iter)
-
-
-seq_len = 16
-batch_size = 32
-dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=seq_len, sliding_step=1, data_mode='coordinate')
-loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
-data_iter = iter(loader)
-i, pred_coor, coor, vis, pred_vis, mask = next(data_iter)
-
-'''
-    

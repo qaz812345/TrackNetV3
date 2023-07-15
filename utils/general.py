@@ -11,6 +11,30 @@ from model import TrackNet, InpaintNet
 
 HEIGHT = 288
 WIDTH = 512
+DELTA_T = 1/math.sqrt(HEIGHT**2 + WIDTH**2)
+COOR_TH = DELTA_T * 50
+
+class ResumeArgumentParser():
+    """ A simple argument parser for parsing the configuration file."""
+    def __init__(self, param_dict):
+        self.model_name = param_dict['model_name']
+        self.seq_len = param_dict['seq_len']
+        self.epochs = param_dict['epochs']
+        self.batch_size = param_dict['batch_size']
+        self.optim = param_dict['optim']
+        self.learning_rate = param_dict['learning_rate']
+        self.lr_scheduler = param_dict['lr_scheduler']
+        self.bg_mode = param_dict['bg_mode']
+        self.alpha = param_dict['alpha']
+        self.frame_alpha = param_dict['frame_alpha']
+        self.mask_ratio = param_dict['mask_ratio']
+        self.tolerance = param_dict['tolerance']
+        self.resume_training = param_dict['resume_training']
+        self.seed = param_dict['seed']
+        self.save_dir = param_dict['save_dir']
+        self.debug = param_dict['debug']
+        self.verbose = param_dict['verbose']
+
 
 ###################################  Helper Functions ###################################
 def get_model(model_name, seq_len=None, bg_mode=None):
