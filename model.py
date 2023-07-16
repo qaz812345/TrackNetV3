@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class Conv2DBlock(nn.Module):
-    """ Conv + BN + ReLU"""
+    """ Conv2D + BN + ReLU"""
     def __init__(self, in_dim, out_dim, **kwargs):
         super(Conv2DBlock, self).__init__(**kwargs)
         self.conv = nn.Conv2d(in_dim, out_dim, kernel_size=3, padding='same', bias=False)
@@ -74,7 +74,7 @@ class TrackNet(nn.Module):
 
     
 class Conv1DBlock(nn.Module):
-    """ Conv + ReLU"""
+    """ Conv1D + LeakyReLU"""
     def __init__(self, in_dim, out_dim, **kwargs):
         super(Conv1DBlock, self).__init__(**kwargs)
         self.conv = nn.Conv1d(in_dim, out_dim, kernel_size=3, padding='same', bias=True)
@@ -86,7 +86,7 @@ class Conv1DBlock(nn.Module):
         return x
 
 class Double1DConv(nn.Module):
-    """ Conv2DBlock x 2"""
+    """ Conv1DBlock x 2"""
     def __init__(self, in_dim, out_dim):
         super(Double1DConv, self).__init__()
         self.conv_1 = Conv1DBlock(in_dim, out_dim)
@@ -111,19 +111,19 @@ class InpaintNet(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, m):
-        x = torch.cat([x, m], dim=2)                                   # (N,   F,   3)
-        x = x.permute(0, 2, 1)                                         # (N,   3,   F)
-        x1 = self.down_1(x)                                            # (N,  16,   F)
-        x2 = self.down_2(x1)                                           # (N,  32,   F)
-        x3 = self.down_3(x2)                                           # (N,  64,   F)
-        x = self.buttleneck(x3)                                       # (N,  256,  F)
-        x = torch.cat([x, x3], dim=1)                                 # (N,  384,  F)
-        x = self.up_1(x)                                               # (N,  128,  F)
-        x = torch.cat([x, x2], dim=1)                                  # (N,  192,  F)
-        x = self.up_2(x)                                               # (N,   64,  F)
-        x = torch.cat([x, x1], dim=1)                                  # (N,   96,  F)
-        x = self.up_3(x)                                               # (N,   32,  F)
-        x = self.predictor(x)                                          # (N,   2,   F)
-        x = self.sigmoid(x)                                            # (N,   2,   F)
-        x = x.permute(0, 2, 1)                                         # (N,   F,   2)
+        x = torch.cat([x, m], dim=2)                                   # (N,   L,   3)
+        x = x.permute(0, 2, 1)                                         # (N,   3,   L)
+        x1 = self.down_1(x)                                            # (N,  16,   L)
+        x2 = self.down_2(x1)                                           # (N,  32,   L)
+        x3 = self.down_3(x2)                                           # (N,  64,   L)
+        x = self.buttleneck(x3)                                        # (N,  256,  L)
+        x = torch.cat([x, x3], dim=1)                                  # (N,  384,  L)
+        x = self.up_1(x)                                               # (N,  128,  L)
+        x = torch.cat([x, x2], dim=1)                                  # (N,  192,  L)
+        x = self.up_2(x)                                               # (N,   64,  L)
+        x = torch.cat([x, x1], dim=1)                                  # (N,   96,  L)
+        x = self.up_3(x)                                               # (N,   32,  L)
+        x = self.predictor(x)                                          # (N,   2,   L)
+        x = self.sigmoid(x)                                            # (N,   2,   L)
+        x = x.permute(0, 2, 1)                                         # (N,   L,   2)
         return x

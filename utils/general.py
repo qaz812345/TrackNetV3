@@ -189,6 +189,7 @@ def generate_frames(video_file):
             cv2.imwrite(os.path.join(rally_dir, f'{len(frames)-1}.png'), frame)#, [cv2.IMWRITE_PNG_COMPRESSION, 0])
     
     median = np.median(np.array(frames), 0)
+    median = median[..., ::-1] # BGR to RGB
     np.savez(os.path.join(rally_dir, 'median.npz'), median=median) # must be lossless
 
 def get_match_median(match_dir):
@@ -216,7 +217,7 @@ def get_rally_median(video_file):
             video_file - A str of video file path with format <data_dir>/<split>/match<match_id>/video/<rally_id>.mp4
     """
     match_dir, rally_id = parse.parse('{}/video/{}.mp4', video_file)
-    
+    save_dir = os.path.join(match_dir, 'frame', rally_id)
     frames = []
     cap = cv2.VideoCapture(video_file)
     success = True
@@ -225,5 +226,5 @@ def get_rally_median(video_file):
         if success:
             frames.append(frame)
     
-    median = np.median(np.array(frames), 0)
-    np.savez(f'{save_dir}/median.npz', median=median) # must be lossless    
+    median = np.median(np.array(frames), 0)[..., ::-1]
+    np.savez(os.path.join(save_dir, 'median.npz'), median=median) # must be lossless    

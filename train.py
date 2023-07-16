@@ -65,7 +65,7 @@ def train_tracknet(model, optimizer, data_loader, param_dict):
             x, y, y_pred = x.detach().cpu().numpy(), y.detach().cpu().numpy(), y_pred.detach().cpu().numpy()
             c = c.numpy()
             
-            # Transform to cv image format (N, F, H , W, C)
+            # Transform inputs to image format (N, L, H , W, C)
             if param_dict['bg_mode'] == 'subtract':
                 x = to_img_format(x)
             elif param_dict['bg_mode'] == 'subtract_concat':
@@ -93,7 +93,7 @@ def train_inpaintnet(model, optimizer, data_loader, param_dict):
         optimizer.zero_grad()
         pred_coor, gt_coor, vis = pred_coor.float().cuda(), gt_coor.float().cuda(), vis.float().cuda()
         # Sample random mask as inpainting mask
-        mask = get_random_mask(gt_coor.shape[:2], param_dict['mask_ratio']).cuda() # (N, F, 1)
+        mask = get_random_mask(gt_coor.shape[:2], param_dict['mask_ratio']).cuda() # (N, L, 1)
         inpaint_mask = torch.logical_and(vis, mask).int()
         pred_coor = pred_coor * (1 - mask)
         refine_coor = model(pred_coor, inpaint_mask)
@@ -162,31 +162,18 @@ if __name__ == '__main__':
 
     print(f'Parameters: {param_dict}')
     print(f'Load dataset...')
-    if args.model_name == 'TrackNet':
-        train_dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=args.seq_len, sliding_step=1, data_mode='heatmap', bg_mode=args.bg_mode, frame_alpha=args.frame_alpha, debug=args.debug)
-        #eval_dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=args.seq_len, sliding_step=args.seq_len, data_mode='heatmap', bg_mode=args.bg_mode, debug=args.debug)
-        val_dataset = Shuttlecock_Trajectory_Dataset(split='val', seq_len=args.seq_len, sliding_step=args.seq_len, data_mode='heatmap', bg_mode=args.bg_mode, debug=args.debug)
-    elif args.model_name == 'InpaintNet':
-        train_dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=args.seq_len, sliding_step=1, data_mode='coordinate', debug=args.debug)
-        #eval_dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=args.seq_len, sliding_step=args.seq_len, data_mode='coordinate', debug=args.debug)
-        val_dataset = Shuttlecock_Trajectory_Dataset(split='val', seq_len=args.seq_len, sliding_step=args.seq_len, data_mode='coordinate', debug=args.debug)
-    else:
-        raise ValueError(f'Invalid model_name: {args.model_name}')
+    data_mode = 'heatmap' if args.model_name == 'TrackNet' else 'coordinate'
+    train_dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=args.seq_len, sliding_step=1, data_mode=data_mode, bg_mode=args.bg_mode, frame_alpha=args.frame_alpha, debug=args.debug)
+    #eval_dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=args.seq_len, sliding_step=args.seq_len, data_mode=data_mode, bg_mode=args.bg_mode, debug=args.debug)
+    val_dataset = Shuttlecock_Trajectory_Dataset(split='val', seq_len=args.seq_len, sliding_step=args.seq_len, data_mode=data_mode, bg_mode=args.bg_mode, debug=args.debug)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=num_workers, drop_last=True, pin_memory=True)
     #eval_loader = DataLoader(eval_dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False, pin_memory=True)
 
     print(f'Create {args.model_name}...')
-    if args.model_name == 'TrackNet':
-        model = get_model(args.model_name, args.seq_len, args.bg_mode).cuda()
-        train_fn = train_tracknet
-        eval_fn = eval_tracknet
-    elif args.model_name == 'InpaintNet':
-        model = get_model(args.model_name).cuda()
-        train_fn = train_inpaintnet
-        eval_fn = eval_inpaintnet
-    else:
-        raise ValueError('Invalid model name.')
+    model = get_model(args.model_name, args.seq_len, args.bg_mode).cuda() if args.model_name == 'TrackNet' else get_model(args.model_name).cuda()
+    train_fn = train_tracknet if args.model_name == 'TrackNet' else train_inpaintnet
+    eval_fn = eval_tracknet if args.model_name == 'TrackNet' else eval_inpaintnet
 
     # Create optimizer and lr scheduler
     if args.optim == 'Adam':
@@ -228,7 +215,7 @@ if __name__ == '__main__':
         write_to_tb(args.model_name, tb_writer, (train_loss, val_loss), val_res, epoch)#, eval_loss, eval_res, 
 
         # Pick best model
-        cur_val_acc = val_res['accuracy'] if args.model_name == 'TrackNet' else val_res['refine']['accuracy']
+        cur_val_acc = val_res['accuracy'] if args.model_name == 'TrackNet' else val_res['inpaint']['accuracy']
         if cur_val_acc >= max_val_acc:
             max_val_acc = cur_val_acc
             if args.lr_scheduler:
