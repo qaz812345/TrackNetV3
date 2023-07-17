@@ -20,12 +20,12 @@
 ## Inference
 * Predict the label csv from the video
     ```
-    python3 predict.py --video_file test.mp4 --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir prediction
+    python predict.py --video_file test.mp4 --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir prediction
     ```
 
 * Predict the label csv from the video, and output a video with predicted trajectory
     ```
-    python3 predict.py --video_file test.mp4 --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir prediction --output_video
+    python predict.py --video_file test.mp4 --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir prediction --output_video
     ```
 
 ## Training
@@ -115,21 +115,37 @@ Shuttlecock_Trajectory_Dataset
 ## Evaluation
 * Evaluate TrackNetV3 on test set
     ```
-    python test.py --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --split test --batch_size 16 --eval_mode weight --save_dir eval
+    python test.py --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir eval
     ```
 
-* Evaluate TrackNetV3 on test set and save the detail results for error analysis
+* Evaluate TrackNet on test set
     ```
-    python test.py --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --split test --batch_size 16 --eval_mode weight --save_dir eval --output_pred
+    python test.py --tracknet_file TrackNet_best.pt --save_dir eval
     ```
 
-* Show predicted video with ground truth label
+
+
+* Generate video with ground truth label and predicted result
     ```
-    python test.py --video_file <video_file>
+    python test.py --tracknet_file TrackNet_best.pt --video_file data/test/match1/video/1_05_02.mp4 
     ```
 
 ## Error Analysis Interface
-* A simple Dash application
+* Evaluate TrackNetV3 on test set and save the detail results for error analysis
+    ```
+    python test.py --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir eval --output_pred
+    ```
+
+* Add json path of evaluation results to the file list in `error_analysis.py`
+    ```
+    30    # Evaluation result file list
+    31    eval_file_list = [
+    32        {'label':  <label_name>, 'value': <json_file_path>},
+    33        {'label':  <label_name>, 'value': <json_file_path>}, 
+    34                                  ⋮
+    ```
+
+* Run Dash application
     ```
     python error_analysis.py --split test --host 127.0.0.1
     ```

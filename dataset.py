@@ -22,7 +22,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         frame_alpha=-1,
         rally_i=None,
         rally_dir=None,
-        frame_list=None,
+        frame_arr=None,
         pred_dict=None,
         padding=False,
         debug=False
@@ -38,7 +38,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 bg_mode - A str specifying the background mode for TrackNet training, '', 'subtract', 'subtract_concat', 'concat'
                 frame_alpha - A float specifying the alpha value of Beta distribution for frame mixup, -1 means no frame mixup
                 rally_i - A int specifying the index of rally
-                frame_list - A list of images for TrackNet inference
+                frame_arr - A list of images for TrackNet inference
                 pred_dict - A dict of prediction results of TrackNet for InpaintNet inference
                 debug - A bool specifying whether to use debug mode
             
@@ -67,18 +67,18 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
 
         # Data for inference
         self.rally_i = rally_i if rally_dir is None else self._get_rally_i(rally_dir)
-        self.frame_list = frame_list
+        self.frame_arr = frame_arr
         self.pred_dict = pred_dict
         self.padding = padding and self.sliding_step == self.seq_len
 
         # Initialize the input data
-        if self.frame_list is not None:
+        if self.frame_arr is not None:
             # For TrackNet inference
             assert self.data_mode == 'heatmap'
-            self.frame_list = frame_list
+            self.frame_arr = frame_arr
             self.data_dict = self._gen_input_from_frame_list()
             if self.bg_mode:
-                self.median = np.median(frame_list, 0)
+                self.median = np.median(frame_arr, 0)
         elif self.pred_dict is not None:
             # For InpaintNet inference
             assert self.data_mode == 'coordinate'
@@ -95,12 +95,13 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 self.input_file = os.path.join(self.root_dir, f'l{self.seq_len}_s{self.sliding_step}_{self.split}_{self.data_mode}.npz')
                 if not os.path.exists(self.input_file):
                     self._gen_input_file()
-                self.data_dict = np.load(self.input_file)
+                data_dict = np.load(self.input_file)
+                self.data_dict = {key: data_dict[key] for key in data_dict.keys()}
 
             if debug:
                 num_data = 256
-                for key in data_dict.keys():
-                    data_dict[key] = data_dict[key][:num_data]
+                for key in self.data_dict.keys():
+                    self.data_dict[key] = self.data_dict[key][:num_data]
 
     def _get_rally_dict(self):
         rally_dirs = get_rally_dirs(self.root_dir, self.split)
@@ -219,6 +220,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                             tmp_frames.append(f_file[last_idx])
                             tmp_coor.append((x[last_idx], y[last_idx]))
                             tmp_vis.append(v[last_idx])
+                        else:
+                            break
                 
                 # Append the input sequence
                 if len(tmp_frames) == self.seq_len:
@@ -270,6 +273,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                             tmp_vis.append(v[last_idx])
                             tmp_vis_pred.append(v_pred[last_idx])
                             tmp_inpaint.append(inpaint[last_idx])
+                        else:
+                            break
 
                 # Append the input sequence
                 if len(tmp_idx) == self.seq_len:
@@ -286,24 +291,26 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
 
     def _gen_input_from_frame_list(self):
         # Calculate the image scaler
-        h, w, _ = self.frame_list[0].shape
+        h, w, _ = self.frame_arr[0].shape
         h_scaler, w_scaler = h / self.HEIGHT, w / self.WIDTH
 
-        id = np.array([], dtype=np.int32).reshape(0, self.seq_len)
+        id = np.array([], dtype=np.int32).reshape(0, self.seq_len, 2)
         last_idx = -1
-        for i in range(0, len(self.frame_list), self.sliding_step):
+        for i in range(0, len(self.frame_arr), self.sliding_step):
             tmp_idx = []
             # Construct a single input sequence
             for f in range(self.seq_len):
-                if i+f < len(self.frame_list):
-                    tmp_idx.append(i+f)
+                if i+f < len(self.frame_arr):
+                    tmp_idx.append((0, i+f))
                     last_idx = i+f
                 else:
                     if self.padding:
-                        tmp_idx.append(last_idx)
-
-            # Append the input sequence
-            id = np.concatenate((id, [tmp_idx]), axis=0)
+                        tmp_idx.append((0, last_idx))
+                    else:
+                        break
+            if len(tmp_idx) == self.seq_len:
+                # Append the input sequence
+                id = np.concatenate((id, [tmp_idx]), axis=0)
         
         return dict(id=id, img_scaler=[(w_scaler, h_scaler)])
 
@@ -312,8 +319,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         coor_pred = np.array([], dtype=np.float32).reshape(0, self.seq_len, 2)
         pred_vis = np.array([], dtype=np.float32).reshape(0, self.seq_len)
         inpaint_mask = np.array([], dtype=np.float32).reshape(0, self.seq_len)
-        x_pred, y_pred, vis_pred = self.pred_dict['X_pred'], self.pred_dict['Y_pred'], self.pred_dict['Visibility_pred']
-        inpaint = self.pred_dict['Inpaint']
+        x_pred, y_pred, vis_pred = self.pred_dict['X'], self.pred_dict['Y'], self.pred_dict['Visibility']
+        inpaint = self.pred_dict['Inpaint_Mask']
         assert len(x_pred) == len(y_pred) == len(vis_pred) == len(inpaint)
         
         # Sliding on the frame sequence
@@ -334,6 +341,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                         tmp_coor_pred.append((x_pred[last_idx], y_pred[last_idx]))
                         tmp_vis_pred.append(vis_pred[last_idx])
                         tmp_inpaint.append(inpaint[last_idx])
+                    else:
+                        break
                 
             if len(tmp_idx) == self.seq_len:
                 assert len(tmp_coor_pred) == len(tmp_inpaint)
@@ -359,9 +368,9 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         return len(self.data_dict['id'])
 
     def __getitem__(self, idx):
-        if self.frame_list is not None:
+        if self.frame_arr is not None:
             data_idx = self.data_dict['id'][idx] # (L,)
-            imgs = self.frame_list[data_idx] # (L, H, W, 3)
+            imgs = self.frame_arr[data_idx[:, 1], ...] # (L, H, W, 3)
             median_img = self.median
             
             # Process frame sequence
@@ -394,9 +403,10 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             # Normalization
             frames /= 255.
 
-            return frames
+            return data_idx, frames
 
         elif self.pred_dict is not None:
+            data_idx = self.data_dict['id'][idx] # (L,)
             coor_pred = self.data_dict['coor_pred'][idx] # (L, 2)
             inpaint = self.data_dict['inpaint_mask'][idx].reshape(-1, 1) # (L, 1)
             w, h = self.data_dict['img_shape']
@@ -405,7 +415,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             coor_pred[:, 0] = coor_pred[:, 0] / w
             coor_pred[:, 1] = coor_pred[:, 1] / h
 
-            return coor_pred, inpaint
+            return data_idx, coor_pred, inpaint
 
         elif self.data_mode == 'heatmap':
             if self.frame_alpha > 0:

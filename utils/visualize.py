@@ -2,7 +2,6 @@ import os
 import cv2
 import parse
 import numpy as np
-import matplotlib.pyplot as plt
 from PIL import Image, ImageSequence
 
 from utils.general import *

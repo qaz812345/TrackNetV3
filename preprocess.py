@@ -38,7 +38,7 @@ for split in ['train', 'val', 'test']:
         match_name = match_dir.split('/')[-1]
         video_files = list_dirs(os.path.join(match_dir, 'video'))
         for video_file in video_files:
-            generate_frames(video_file)
+            generate_data_frames(video_file)
             video_frame_count = get_num_frames(video_file)
             video_name = video_file.split('/')[-1]
             print(f'[{split} / {match_name} / {video_name}]\tvideo frames: {video_frame_count}')

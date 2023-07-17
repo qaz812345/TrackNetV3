@@ -27,8 +27,11 @@ split = args.split
 host = args.host
 debug = args.debug
 
-eval_file_list = [{'label': 'tracknet', 'value': 'tracknet_eval/test_eval_analysis_weight.json'},
-                  {'label': 'tracknetv3', 'value': 'tracknetv3_eval/test_eval_analysis_weight.json'}]
+# Evaluation result file list
+eval_file_list = [
+    {'label': 'tracknet', 'value': 'tracknet_eval/test_eval_analysis_weight.json'},
+    {'label': 'tracknetv3', 'value': 'tracknetv3_eval/test_eval_analysis_weight.json'}
+]
 
 # Init global variables
 pred_types = ['TP', 'TN', 'FP1', 'FP2', 'FN']

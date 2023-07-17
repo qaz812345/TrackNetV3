@@ -7,6 +7,8 @@ import shutil
 import numpy as np
 import pandas as pd
 
+from collections import deque
+from PIL import Image, ImageDraw
 from model import TrackNet, InpaintNet
 
 HEIGHT = 288
@@ -146,8 +148,88 @@ def get_rally_dirs(data_dir, split):
     
     return rally_dirs # split/match#/frame/rally_id
 
-############################### Preprocessing Functions ###############################
 def generate_frames(video_file):
+    assert video_file[-4:] == '.mp4'
+    cap = cv2.VideoCapture(video_file)
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_list = []
+    success = True
+
+    # Sample frames until video end or exceed the number of labels
+    while success:
+        success, frame = cap.read()
+        if success:
+            frame_list.append(frame)
+            
+    return frame_list, fps, (w, h)
+
+def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, label_df=None):
+    if label_df is not None:
+        f_i, x, y, vis = label_df['Frame'], label_df['X'], label_df['Y'], label_df['Visibility']
+    
+    x_pred, y_pred, vis_pred = pred_dict['X'], pred_dict['Y'], pred_dict['Visibility']
+
+    # Video config
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(save_file, fourcc, video_cofig['fps'], video_cofig['shape'])
+    
+    # For storing trajectory
+    pred_queue = deque()
+    if label_df is not None:
+        gt_queue = deque()
+    
+    # Draw prediction
+    for i, frame in enumerate(frame_list):
+        # Check capacity of queue
+        if len(pred_queue) >= traj_len:
+            pred_queue.pop()
+        if label_df is not None and len(gt_queue) >= traj_len:
+            gt_queue.pop()
+        
+        # Push ball coordinates for each frame
+        if label_df is not None:
+            gt_queue.appendleft([x[i], y[i]]) if vis[i] and i < len(label_df) else gt_queue.appendleft(None)
+        pred_queue.appendleft([x_pred[i], y_pred[i]]) if vis_pred[i] else pred_queue.appendleft(None)
+
+        # Convert to PIL image for drawing
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)   
+        img = Image.fromarray(img)
+
+        # Draw ball trajectory
+        if label_df is not None:
+            for i in range(len(gt_queue)):
+                if gt_queue[i] is not None:
+                    draw_x = gt_queue[i][0]
+                    draw_y = gt_queue[i][1]
+                    bbox =  (draw_x - 2, draw_y - 2, draw_x + 2, draw_y + 2)
+                    draw = ImageDraw.Draw(img)
+                    draw.ellipse(bbox, outline ='red')
+        
+        for i in range(len(pred_queue)):
+            if pred_queue[i] is not None:
+                draw_x = pred_queue[i][0]
+                draw_y = pred_queue[i][1]
+                bbox =  (draw_x - 2, draw_y - 2, draw_x + 2, draw_y + 2)
+                draw = ImageDraw.Draw(img)
+                draw.ellipse(bbox, outline ='yellow')
+                del draw
+
+        # Convert back to cv2 image and write to output video
+        frame =  cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        out.write(frame)
+    out.release()
+
+def write_pred_csv(pred_dict, save_file=None, save_inpaint_mask=False):
+    if save_inpaint_mask:
+        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y'], 'Inpainting': pred_dict['Inpainting']})
+    else:
+        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y']})
+    pred_df.to_csv(save_file, index=False)
+    
+############################### Preprocessing Functions ###############################
+def generate_data_frames(video_file):
     """ Sample frames from the video.
 
         args:

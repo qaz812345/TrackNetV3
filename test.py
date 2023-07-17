@@ -38,8 +38,8 @@ def eval_tracknet(model, data_loader, param_dict):
         loss = WBCELoss(y_pred, y)
         losses.append(loss.item())
 
-        tmp_res = get_confusion_matrix(i, y_true=y, y_pred=y_pred, tolerance=param_dict['tolerance'])
-        confusion_matrix += tmp_res
+        pred_dict = evaluate(i, y_true=y, y_pred=y_pred, tolerance=param_dict['tolerance'])
+        confusion_matrix += get_eval_res(pred_dict)
         
         if param_dict['verbose']:
             TP, TN, FP1, FP2, FN = confusion_matrix
@@ -76,14 +76,14 @@ def eval_inpaintnet(model, data_loader, param_dict):
         
         for eval_type in eval_types:
             if eval_type == 'inpaint':
-                tmp_res = get_confusion_matrix(i, c_true=coor, c_pred=coor_inpaint, tolerance=param_dict['tolerance'])
+                pred_dict = evaluate(i, c_true=coor, c_pred=coor_inpaint, tolerance=param_dict['tolerance'])
             elif eval_type == 'reconstruct':
-                tmp_res = get_confusion_matrix(i, c_true=coor_pred, c_pred=coor_inpaint, tolerance=param_dict['tolerance'])
+                pred_dict = evaluate(i, c_true=coor_pred, c_pred=coor_inpaint, tolerance=param_dict['tolerance'])
             elif eval_type == 'baseline':
-                tmp_res = get_confusion_matrix(i, c_true=coor, c_pred=coor_pred, tolerance=param_dict['tolerance'])
+                pred_dict = evaluate(i, c_true=coor, c_pred=coor_pred, tolerance=param_dict['tolerance'])
             else:
                 raise ValueError('Invalid eval_type')
-            confusion_matrix[eval_type] += tmp_res
+            confusion_matrix[eval_type] += get_eval_res(pred_dict)
         
         if param_dict['verbose']:
             TP, TN, FP1, FP2, FN = confusion_matrix['inpaint']
@@ -98,7 +98,7 @@ def eval_inpaintnet(model, data_loader, param_dict):
     return float(np.mean(losses)), res_dict
 
 # For testing evaluation
-def gen_inpaint_mask(pred_dict, y_max, y_th_ratio=0.05):
+def generate_inpaint_mask(pred_dict, y_max, y_th_ratio=0.05):
     y = np.array(pred_dict['Y'])
     vis_pred = np.array(pred_dict['Visibility'])
     inpaint_mask = np.zeros_like(y)
@@ -125,7 +125,15 @@ def gen_inpaint_mask(pred_dict, y_max, y_th_ratio=0.05):
     
     return inpaint_mask.tolist()
 
-def get_eval_res(pred_dict, drop=False):
+def get_eval_res(pred_dict):
+    type_res = np.array(pred['Type'])
+    res = np.zeros(5)
+    for pred_type in pred_types:
+        res[pred_types_map[pred_type]] += int((type_res == pred_types_map[pred_type]).sum())
+
+    return res
+
+def get_test_res(pred_dict, drop=False):
     res_dict = {pred_type: 0 for pred_type in pred_types}
     for rally_key, pred in pred_dict.items():
         if drop:
@@ -159,7 +167,82 @@ def get_ensemble_weight(seq_len, eval_mode):
         raise ValueError('Invalid mode')
     return weight
 
-def perdict(indices, y_true=None, y_pred=None, c_true=None, c_pred=None, tolerance=4, img_scaler=1):
+def predict_location(heatmap, mode='center'):
+    """ Get coordinates from the heatmap.
+
+        args:
+            heatmap - A numpy.ndarray of a single heatmap with shape (H, W)
+
+        returns:
+            ints specifying center coordinates of object
+    """
+    if np.amax(heatmap) == 0:
+        # No respond in heatmap
+        if mode == 'center':
+            return 0, 0
+        if mode == 'bbox':
+            return 0, 0, 0, 0
+    else:
+        # Find all respond area in the heapmap
+        (cnts, _) = cv2.findContours(heatmap.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        rects = [cv2.boundingRect(ctr) for ctr in cnts]
+
+        # Find largest area amoung all contours
+        max_area_idx = 0
+        max_area = rects[0][2] * rects[0][3]
+        for i in range(1, len(rects)):
+            area = rects[i][2] * rects[i][3]
+            if area > max_area:
+                max_area_idx = i
+                max_area = area
+        target = rects[max_area_idx] # (x, y, w, h)
+        if mode == 'center':
+            return int((target[0] + target[2] / 2)), int((target[1] + target[3] / 2)) # cx, cy
+        if mode == 'bbox':
+            '''bbox_list = []
+            for i in range(len(rects)):
+                bbox_list.append((rects[i][0], rects[i][1], rects[i][0]+rects[i][2], rects[i][1]+rects[i][3])) # x1, y1, x2, y2'''
+            return target[0], target[1], target[0]+target[2], target[1]+target[3]
+
+def predict(indices, y_pred=None, c_pred=None, img_scaler=(1, 1)):
+    pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[]}
+    indices = indices.detach().cpu().numpy()if torch.is_tensor(indices) else indices.numpy()
+    batch_size, seq_len = indices.shape[0], indices.shape[1]
+    if y_pred is not None:
+        y_pred = y_pred > 0.5
+        y_pred = y_pred.detach().cpu().numpy() if torch.is_tensor(y_pred) else y_pred
+        y_pred = to_img_format(y_pred) # (N, F, H, W)
+    
+    if c_pred is not None:
+        c_pred = c_pred.detach().cpu().numpy() if torch.is_tensor(c_pred) else c_pred
+        c_pred[:, :, 0] = c_pred[:, :, 0] * WIDTH * img_scaler[0]
+        c_pred[:, :, 1] = c_pred[:, :, 1] * HEIGHT * img_scaler[1]
+
+    prev_f_i = -1
+    for n in range(batch_size):
+        for f in range(seq_len):
+            f_i = indices[n][f][1]
+            if f_i != prev_f_i:
+                if c_pred is not None:
+                    c_p = c_pred[n][f]
+                    cx_pred, cy_pred = int(c_p[0]), int(c_p[1]) 
+                elif y_pred is not None:
+                    y_p = y_pred[n][f]
+                    cx_pred, cy_pred = predict_location(to_img(y_p))
+                    cx_pred, cy_pred = int(cx_pred*img_scaler[0]), int(cy_pred*img_scaler[1])
+                else:
+                    raise ValueError('Invalid input')
+                vis_pred = 0 if cx_pred == 0 and cy_pred == 0 else 1
+                pred_dict['Frame'].append(int(f_i))
+                pred_dict['X'].append(cx_pred)
+                pred_dict['Y'].append(cy_pred)
+                pred_dict['Visibility'].append(vis_pred)
+                prev_f_i = f_i
+            else:
+                break
+    return pred_dict    
+
+def evaluate(indices, y_true=None, y_pred=None, c_true=None, c_pred=None, tolerance=4, img_scaler=1):
     """
         Predict and output the result of each frame
         args:
@@ -206,11 +289,11 @@ def perdict(indices, y_true=None, y_pred=None, c_true=None, c_pred=None, toleran
         c_pred[:, :, 0] = c_pred[:, :, 0] * WIDTH
         c_pred[:, :, 1] = c_pred[:, :, 1] * HEIGHT
 
-    prev_f_i = -1
+    prev_d_i = [-1, -1]
     for n in range(batch_size):
         for f in range(seq_len):
-            f_i = int(indices[n][f][1])
-            if f_i != prev_f_i:
+            d_i = indices[n][f]
+            if d_i != prev_d_i:
                 if c_true is not None and c_pred is not None:
                     c_t = c_true[n][f]
                     c_p = c_pred[n][f]
@@ -266,10 +349,11 @@ def perdict(indices, y_true=None, y_pred=None, c_true=None, c_pred=None, toleran
                         raise ValueError('Invalid input')
                 else:
                     raise ValueError('Invalid input')
-                pred_dict['Frame'].append(f_i)
+                pred_dict['Frame'].append(int(d_i[0]))
                 pred_dict['X'].append(int(cx_pred*img_scaler))
                 pred_dict['Y'].append(int(cy_pred*img_scaler))
                 pred_dict['Visibility'].append(vis_pred)
+                prev_d_i = d_i
             else:
                 break
     
@@ -280,12 +364,16 @@ def test(model, split, param_dict, save_inpaint_mask=False):
     rally_dirs = get_rally_dirs(data_dir, split)
     rally_dirs = [os.path.join(data_dir, rally_dir) for rally_dir in rally_dirs]
     for rally_dir in rally_dirs:
-        _, match_id, rally_id = parse.parse('{}/match{}/frame/{}', rally_dir)
+        match_dir, rally_id = parse.parse('{}/frame/{}', rally_dir)
+        match_id = match_dir.split('match')[-1]
         rally_key = f'{match_id}_{rally_id}'
         tmp_pred = test_rally(model, rally_dir, param_dict)
         pred_dict[rally_key] = tmp_pred
         if save_inpaint_mask:
-            write_pred_csv(rally_dir, tmp_pred, save_inpaint_mask=save_inpaint_mask)
+            if not os.path.exists(os.path.join(match_dir, 'predicted_csv')):
+                os.makedirs(os.path.join(match_dir, 'predicted_csv'))
+            csv_file = os.path.join(match_dir, 'predicted_csv',f'{rally_id}_ball.csv')
+            write_pred_csv(tmp_pred, save_file=csv_file, save_inpaint_mask=save_inpaint_mask)
     return pred_dict
 
 def test_rally(model, rally_dir, param_dict):
@@ -307,7 +395,7 @@ def test_rally(model, rally_dir, param_dict):
                 y_pred = tracknet(x).detach().cpu()
             
             # predict
-            tmp_pred = perdict(i, y_true=y, y_pred=y_pred, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
+            tmp_pred = evaluate(i, y_true=y, y_pred=y_pred, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
             for key in tmp_pred.keys():
                 pred_dict[key].extend(tmp_pred[key])
     else:
@@ -368,12 +456,12 @@ def test_rally(model, rally_dir, param_dict):
                     ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
                     
             # Predict
-            tmp_pred = perdict(ensemble_i, y_true=ensemble_y, y_pred=ensemble_y_pred,
+            tmp_pred = evaluate(ensemble_i, y_true=ensemble_y, y_pred=ensemble_y_pred,
                                tolerance=param_dict['tolerance'], img_scaler=img_scaler)
             for key in tmp_pred.keys():
                 pred_dict[key].extend(tmp_pred[key])
 
-            # keep last predictions for ensemble in next iteration
+            # Update buffer, keep last predictions for ensemble in next iteration
             y_pred_buffer = y_pred_buffer[-(seq_len-1):]
     
     # Test on TrackNetV3 (TrackNet + InpaintNet)
@@ -397,16 +485,16 @@ def test_rally(model, rally_dir, param_dict):
                 
                 # predict
                 
-                tmp_pred = perdict(i, c_true=coor, c_pred=coor_inpaint, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
+                tmp_pred = evaluate(i, c_true=coor, c_pred=coor_inpaint, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
                 for key in tmp_pred.keys():
                     pred_dict[key].extend(tmp_pred[key])
                 '''for eval_type in eval_types:
                     if eval_type == 'inpaint':
-                        tmp_pred = perdict(i, c_true=coor, c_pred=coor_inpaint, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
+                        tmp_pred = evaluate(i, c_true=coor, c_pred=coor_inpaint, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
                     elif eval_type == 'reconstruct':
-                        tmp_pred = perdict(i, c_true=coor_pred, c_pred=coor_inpaint, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
+                        tmp_pred = evaluate(i, c_true=coor_pred, c_pred=coor_inpaint, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
                     elif eval_type == 'baseline':
-                        tmp_pred = perdict(i, c_true=coor, c_pred=coor_pred, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
+                        tmp_pred = evaluate(i, c_true=coor, c_pred=coor_pred, tolerance=param_dict['tolerance'], img_scaler=img_scaler)
                     else:
                         raise ValueError('Invalid eval_type')
                     for key in tmp_pred.keys():
@@ -480,71 +568,33 @@ def test_rally(model, rally_dir, param_dict):
                 ensemble_coor_inpaint[th_mask] = 0.
 
                 # Predict
-                tmp_pred = perdict(ensemble_i, c_true=ensemble_coor, c_pred=ensemble_coor_inpaint,
+                tmp_pred = evaluate(ensemble_i, c_true=ensemble_coor, c_pred=ensemble_coor_inpaint,
                                     tolerance=param_dict['tolerance'], img_scaler=img_scaler)
                 for key in tmp_pred.keys():
                     pred_dict[key].extend(tmp_pred[key])
                 '''for eval_type in eval_types:
                     if eval_type == 'inpaint':
-                        tmp_pred = perdict(ensemble_i, c_true=ensemble_coor, c_pred=ensemble_coor_inpaint,
+                        tmp_pred = evaluate(ensemble_i, c_true=ensemble_coor, c_pred=ensemble_coor_inpaint,
                                            tolerance=param_dict['tolerance'], img_scaler=img_scaler)
                     elif eval_type == 'reconstruct':
-                        tmp_pred = perdict(ensemble_i, c_true=ensemble_coor_pred, c_pred=ensemble_coor_inpaint,
+                        tmp_pred = evaluate(ensemble_i, c_true=ensemble_coor_pred, c_pred=ensemble_coor_inpaint,
                                            tolerance=param_dict['tolerance'], img_scaler=img_scaler)
                     elif eval_type == 'baseline':
-                        tmp_pred = perdict(ensemble_i, c_true=ensemble_coor, c_pred=ensemble_coor_pred,
+                        tmp_pred = evaluate(ensemble_i, c_true=ensemble_coor, c_pred=ensemble_coor_pred,
                                            tolerance=param_dict['tolerance'], img_scaler=img_scaler)
                     else:
                         raise ValueError('Invalid eval_type')
                     for key in tmp_pred.keys():
                         pred_dict[eval_type][key].extend(tmp_pred[key])'''
 
-                # keep last predictions for ensemble in next iteration
+                # Update buffer, keep last predictions for ensemble in next iteration
                 coor_inpaint_buffer = coor_inpaint_buffer[-(seq_len-1):]
 
         return pred_dict
     else:
-        pred_dict['Inpainting'] = gen_inpaint_mask(pred_dict, y_max=h, y_th_ratio=0.05)
+        pred_dict['Inpaint_Mask'] = generate_inpaint_mask(pred_dict, y_max=h, y_th_ratio=0.05)
         return pred_dict
 
-def write_pred_video(rally_dir, pred_dict, save_dir):
-    match_dir, rally_id = parse.parse('{}/frame/{}', rally_dir)
-    csv_file = os.path.join(match_dir, 'corrected_csv', f'{rally_id}_ball.csv') if 'test' in rally_dir else os.path.join(match_dir, 'csv', f'{rally_id}_ball.csv')
-    label_df = pd.read_csv(csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
-    f_i, x, y, vis = label_df['Frame'], label_df['X'], label_df['Y'], label_df['Visibility']
-    x_pred, y_pred, vis_pred = pred_dict['X'], pred_dict['Y'], pred_dict['Visibility']
-
-    # Video config
-    out_video_file = os.path.join(save_dir, f'{rally_id}.mp4')
-    img_file = os.path.join(rally_dir, '0.png')
-    w, h = Image.open(img_file).size
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(out_video_file, fourcc, 30, (w, h))
-
-    # Draw prediction
-    for i in f_i:
-        img = cv2.imread(os.path.join(rally_dir, f'{i}.png'))
-        if vis[i]:
-            cv2.circle(img, (x[i], y[i]), 5, (0, 0, 255), -1)
-        if vis_pred[i]:
-            cv2.circle(img, (x_pred[i], y_pred[i]), 5, (0, 255, 0), -1)
-        out.write(img)
-    out.release()
-
-def write_pred_csv(rally_dir, pred_dict, save_dir=None, save_inpaint_mask=False):
-    match_dir, rally_id = parse.parse('{}/frame/{}', rally_dir)
-    if save_dir:
-        csv_file = os.path.join(save_dir, f'{rally_id}_ball.csv')
-    else:
-        if not os.path.exists(os.path.join(match_dir, 'predicted_csv')):
-            os.makedirs(os.path.join(match_dir, 'predicted_csv'))
-        csv_file = os.path.join(match_dir, 'predicted_csv',f'{rally_id}_ball.csv')
-    
-    if save_inpaint_mask:
-        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y'], 'Inpainting': pred_dict['Inpainting']})
-    else:
-        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y']})
-    pred_df.to_csv(csv_file, index=False)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -589,13 +639,17 @@ if __name__ == '__main__':
         print(f'Test on video {args.video_file} ...')
         match_dir, rally_id = parse.parse('{}/video/{}.mp4', args.video_file)
         rally_dir = os.path.join(match_dir, 'frame', rally_id)
+        csv_file = os.path.join(match_dir, 'corrected_csv', f'{rally_id}_ball.csv') if 'test' in rally_dir else os.path.join(match_dir, 'csv', f'{rally_id}_ball.csv')
+        try:
+            label_df = pd.read_csv(csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
+        except:
+            raise Exception(f'{csv_file} does not exist.')
         pred_dict = test_rally(model, rally_dir, param_dict)
-        if args.inpaintnet_file:
-            write_pred_video(rally_dir, pred_dict['inpaint'], args.save_dir)
-            write_pred_csv(rally_dir, pred_dict['inpaint'], args.save_dir)
-        else:
-            write_pred_video(rally_dir, pred_dict, args.save_dir)
-            write_pred_csv(rally_dir, pred_dict, args.save_dir)
+        out_video_file = os.path.join(args.save_dir, f'{rally_id}.mp4')
+        out_csv_file = os.path.join(args.save_dir, f'{rally_id}_ball.csv')
+        frame_list, fps, (w, h) = generate_frames(args.video_file)
+        write_pred_video(frame_list, dict(fps=fps, shape=(w, h)), pred_dict, label_df=label_df, save_file=out_video_file)
+        write_pred_csv(pred_dict, save_file=out_csv_file)
     else:
         # Evaluation on dataset
         eval_analysis_file = os.path.join(args.save_dir, f'{args.split}_eval_analysis_{args.eval_mode}.json') # for error analysis interface
@@ -611,9 +665,9 @@ if __name__ == '__main__':
             
             if args.split == 'test':
                 # drop samples which is not in effective trajectory
-                res_dict = get_eval_res(pred_dict, drop=True)
+                res_dict = get_test_res(pred_dict, drop=True)
             else:
-                res_dict = get_eval_res(pred_dict, drop=False)
+                res_dict = get_test_res(pred_dict, drop=False)
             
             with open(eval_res_file, 'w') as f:
                 json.dump(res_dict, f, indent=2)
