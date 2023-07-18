@@ -32,12 +32,12 @@
 ### Prepare Dataset
 * Shuttlecock Trajectory Dataset description: https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw 
 * Set the data root directory in ```dataset.py```.
-* Exclude `train/match16` due to inconsistent camera viewpoints.
 * Data Preprocessing
     ```
     python preprocess.py
     ```
 * The `frame` directories and the `val` directory will be generated after preprocessing.
+* Remove `train/match16/median.npz` due to inconsistent camera viewpoints.
 * Dataset File Structure:
 ```
 Shuttlecock_Trajectory_Dataset
@@ -138,11 +138,24 @@ Shuttlecock_Trajectory_Dataset
 
 * Add json path of evaluation results to the file list in `error_analysis.py`
     ```
-    30    # Evaluation result file list
-    31    eval_file_list = [
-    32        {'label':  <label_name>, 'value': <json_file_path>},
-    33        {'label':  <label_name>, 'value': <json_file_path>}, 
-    34                                  ⋮
+    30  # Evaluation result file list
+    31  if split == 'train':
+    32      eval_file_list = [
+    33          {'label': label_name, 'value': json_path},
+     ⋮                              ⋮
+            ]
+        elif split == 'val':
+            eval_file_list = [
+                {'label': label_name, 'value': json_path},
+                                    ⋮
+            ]
+        elif split == 'test':
+            eval_file_list = [
+                {'label': label_name, 'value': json_path},
+                                    ⋮
+            ]
+        else:
+            raise ValueError(f'Invalid split: {split}')                                  
     ```
 
 * Run Dash application

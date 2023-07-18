@@ -28,17 +28,29 @@ host = args.host
 debug = args.debug
 
 # Evaluation result file list
-eval_file_list = [
-    {'label': 'tracknet', 'value': 'tracknet_eval/test_eval_analysis_weight.json'},
-    {'label': 'tracknetv3', 'value': 'tracknetv3_eval/test_eval_analysis_weight.json'}
-]
+if split == 'train':
+    eval_file_list = [
+        # {'label': label_name, 'value': json_path},
+    ]
+elif split == 'val':
+    eval_file_list = [
+        # {'label': label_name, 'value': json_path},
+    ]
+elif split == 'test':
+    eval_file_list = [
+        {'label': 'tracknet', 'value': 'tracknet_eval/test_eval_analysis_weight.json'},
+        {'label': 'tracknetv3', 'value': 'tracknetv3_eval/test_eval_analysis_weight.json'}
+    ]
+else:
+    raise ValueError(f'Invalid split: {split}')
+
 
 # Init global variables
 pred_types = ['TP', 'TN', 'FP1', 'FP2', 'FN']
 pred_types_map = {pred_type: i for i, pred_type in enumerate(pred_types)}
 match_id, rally_id, frame_id = None, None, None
 
-# Generatedrop down list values of  rally id
+# Generatedrop down list values of rally id
 rally_keys = []
 rally_dirs = get_rally_dirs(data_dir, split)
 rally_dirs = [os.path.join(data_dir, d) for d in rally_dirs]

@@ -48,4 +48,8 @@ for split in ['train', 'val', 'test']:
         split_frame_count += match_frame_count
     
     print(f'[{split}]:\ttotal frames: {split_frame_count}')
+
+# Plot median frames, save at data_dir/median
+plot_median_files(data_dir)
+
 print('Done.')
