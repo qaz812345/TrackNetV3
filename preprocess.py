@@ -3,7 +3,7 @@ import parse
 import shutil
 
 from dataset import data_dir
-from utils.general import list_dirs, generate_frames, get_num_frames, get_match_median
+from utils.general import list_dirs, generate_data_frames, get_num_frames, get_match_median
 
 # Form validation set
 if not os.path.exists(os.path.join(data_dir, 'val')):

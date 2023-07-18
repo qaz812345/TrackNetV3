@@ -75,10 +75,15 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         if self.frame_arr is not None:
             # For TrackNet inference
             assert self.data_mode == 'heatmap'
-            self.frame_arr = frame_arr
             self.data_dict = self._gen_input_from_frame_list()
             if self.bg_mode:
-                self.median = np.median(frame_arr, 0)
+                median = np.median(self.frame_arr, 0)
+                if self.bg_mode == 'concat':
+                    median = Image.fromarray(median.astype('uint8'))
+                    median = np.array(median.resize(size=(self.WIDTH, self.HEIGHT)))
+                    self.median = np.moveaxis(median, -1, 0)
+                else:
+                    self.median = median
         elif self.pred_dict is not None:
             # For InpaintNet inference
             assert self.data_mode == 'coordinate'
@@ -371,7 +376,9 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         if self.frame_arr is not None:
             data_idx = self.data_dict['id'][idx] # (L,)
             imgs = self.frame_arr[data_idx[:, 1], ...] # (L, H, W, 3)
-            median_img = self.median
+
+            if self.bg_mode:
+                median_img = self.median
             
             # Process frame sequence
             frames = np.array([]).reshape(0, self.HEIGHT, self.WIDTH)
@@ -395,9 +402,6 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 frames = np.concatenate((frames, img), axis=0)
             
             if self.bg_mode == 'concat':
-                median_img = Image.fromarray(self.median.astype('uint8'))
-                median_img = np.array(median_img.resize(size=(self.WIDTH, self.HEIGHT)))
-                median_img = np.moveaxis(median_img, -1, 0)
                 frames = np.concatenate((median_img, frames), axis=0)
             
             # Normalization
