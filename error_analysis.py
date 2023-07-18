@@ -38,8 +38,8 @@ elif split == 'val':
     ]
 elif split == 'test':
     eval_file_list = [
-        {'label': 'tracknet', 'value': 'tracknet_eval/test_eval_analysis_weight.json'},
-        {'label': 'tracknetv3', 'value': 'tracknetv3_eval/test_eval_analysis_weight.json'}
+        {'label': 'tracknet', 'value': 'test/tracknet_eval/test_eval_analysis_weight.json'},
+        {'label': 'tracknetv3', 'value': 'test/tracknetv3_eval/test_eval_analysis_weight.json'}
     ]
 else:
     raise ValueError(f'Invalid split: {split}')
@@ -78,15 +78,15 @@ app.layout = html.Div(children=[
     html.Div(children=[
         html.Div(children=[
             html.Label(['Result 1:'], style={'font-weight': 'bold', "text-align": "center"}),
-            dcc.Dropdown(eval_file_list, eval_file_list[0]['value'], id='eval-file-1')
+            dcc.Dropdown(eval_file_list, eval_file_list[0]['value'], id='eval-file-1-dropdown')
         ], style=dict(width='20%', margin='10px')),
         html.Div(children=[
             html.Label(['Result 2:'], style={'font-weight': 'bold', "text-align": "center"}),
-            dcc.Dropdown(eval_file_list, eval_file_list[1]['value'], id='eval-file-2')
+            dcc.Dropdown(eval_file_list, eval_file_list[0]['value'], id='eval-file-2-dropdown')
         ], style=dict(width='20%', margin='10px')),
         html.Div(children=[
             html.Label(['Rally ID:'], style={'font-weight': 'bold', "text-align": "center"}),
-            dcc.Dropdown(rally_keys, rally_keys[0], id='rally-key')
+            dcc.Dropdown(rally_keys, rally_keys[0], id='rally-key-dropdown')
         ], style=dict(width='20%', margin='10px'))
     ], style={'display':'flex', 'justify-content':'center', 'text-align':'center'}),
     # Time series plot
@@ -111,11 +111,11 @@ app.layout = html.Div(children=[
 
 @app.callback(
     Output('time_fig', 'figure'),
-    [Input('eval-file-1', 'value'),
-    Input('eval-file-1', 'label'),
-    Input('eval-file-2', 'value'),
-    Input('eval-file-2', 'label'),
-    Input('rally-key', 'value')]
+    [Input('eval-file-1-dropdown', 'value'),
+    Input('eval-file-1-dropdown', 'label'),
+    Input('eval-file-2-dropdown', 'value'),
+    Input('eval-file-2-dropdown', 'label'),
+    Input('rally-key-dropdown', 'value')]
 )
 def change_dropdown(eval_file_1, eval_name_1, eval_file_2, eval_name_2, rally_key):
     global match_id, rally_id
@@ -149,11 +149,10 @@ def change_dropdown(eval_file_1, eval_name_1, eval_file_2, eval_name_2, rally_ke
     assert os.path.exists(os.path.join(data_dir, split, f'match{match_id}', csv_dir, f'{rally_id}_ball.csv'))
     csv_file = os.path.join(data_dir, split, f'match{match_id}', csv_dir, f'{rally_id}_ball.csv')
     label_df = pd.read_csv(csv_file, encoding='utf8')
-    rally_len = len(label_df)
     x, y, vis = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
     
     # Time series plot
-    timestamp = np.arange(rally_len)
+    timestamp = np.arange(len(label_df))
     coor_data = np.stack([x, y, vis, x_pred_1, y_pred_1, vis_pred_1, x_pred_2, y_pred_2, vis_pred_2], axis=1)
     time_fig = go.Figure().set_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=(eval_name_1, eval_name_2))
     for i, showlegend in [(0, True), (1, False)]:
@@ -196,9 +195,9 @@ def show_frame(hoverData):
     
     #print(f'hover_data: {hoverData}')
     frame_id = hoverData['points'][0]['x']
-    cx, cy, vis = hoverData['points'][0]['customdata'][0], hoverData['points'][0]['customdata'][1], hoverData['points'][0]['customdata'][2]
-    cx_pred_1, cy_pred_1, vis_pred_1 = hoverData['points'][0]['customdata'][3], hoverData['points'][0]['customdata'][4], hoverData['points'][0]['customdata'][5]
-    cx_pred_2, cy_pred_2, vis_pred_2 = hoverData['points'][0]['customdata'][6], hoverData['points'][0]['customdata'][7], hoverData['points'][0]['customdata'][8]
+    cx, cy = hoverData['points'][0]['customdata'][0], hoverData['points'][0]['customdata'][1]
+    cx_pred_1, cy_pred_1 = hoverData['points'][0]['customdata'][3], hoverData['points'][0]['customdata'][4]
+    cx_pred_2, cy_pred_2 = hoverData['points'][0]['customdata'][6], hoverData['points'][0]['customdata'][7]
     
     # Read frame with specified frame id
     img_path = os.path.join(data_dir, split, f'match{match_id}', 'frame', rally_id, f'{frame_id}.png')
