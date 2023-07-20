@@ -169,7 +169,7 @@ def change_dropdown(eval_file, rally_key):
 
     time_fig.update_yaxes(title_text='Error Count', range=[y_min, y_max], fixedrange=True)
     time_fig.update_xaxes(title_text='Frame ID')
-    time_fig.update_layout(barmode='stack', dragmode='pan', clickmode='event+select', margin={'l':20, 'r':20, 't':50, 'b':10}, height=200,
+    time_fig.update_layout(barmode='stack', dragmode='pan', clickmode='event+select', margin={'l':20, 'r':20, 't':50, 'b':10}, height=300,
                       title_text=f'Rally {rally_key} Error Distribution', title_x=0.5, legend_title='Error Type')
     time_fig.update_traces(
         hovertemplate="<br>".join([

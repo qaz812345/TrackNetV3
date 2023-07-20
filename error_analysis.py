@@ -192,6 +192,7 @@ def change_dropdown(eval_file_1, eval_name_1, eval_file_2, eval_name_2, rally_ke
 def show_frame(hoverData):
     global match_id, rally_id
     radius = 5
+    bbox_width = 1
     
     #print(f'hover_data: {hoverData}')
     frame_id = hoverData['points'][0]['x']
@@ -209,9 +210,9 @@ def show_frame(hoverData):
     # Frame plot
     frame_fig = go.Figure()
     frame_fig.add_trace(img_fig.data[0])
-    gt_bbox = [dict(type="rect", x0=cx-radius, y0=cy-radius, x1=cx+radius, y1=cy+radius, line=dict(color="red"))]
-    pred_bbox_1 = [dict(type="rect", x0=cx_pred_1-radius, y0=cy_pred_1-radius, x1=cx_pred_1+radius, y1=cy_pred_1+radius, line=dict(color="green"))]
-    pred_bbox_2 = [dict(type="rect", x0=cx_pred_2-radius, y0=cy_pred_2-radius, x1=cx_pred_2+radius, y1=cy_pred_2+radius, line=dict(color="blue"))]
+    gt_bbox = [dict(type="rect", x0=cx-radius, y0=cy-radius, x1=cx+radius, y1=cy+radius, line=dict(color="red", width=bbox_width))]
+    pred_bbox_1 = [dict(type="rect", x0=cx_pred_1-radius, y0=cy_pred_1-radius, x1=cx_pred_1+radius, y1=cy_pred_1+radius, line=dict(color="green", width=bbox_width))]
+    pred_bbox_2 = [dict(type="rect", x0=cx_pred_2-radius, y0=cy_pred_2-radius, x1=cx_pred_2+radius, y1=cy_pred_2+radius, line=dict(color="blue", width=bbox_width))]
     frame_fig.update_layout(
         updatemenus=[
             dict(

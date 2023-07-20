@@ -126,7 +126,7 @@ def generate_inpaint_mask(pred_dict, y_max, y_th_ratio=0.05):
     return inpaint_mask.tolist()
 
 def get_eval_res(pred_dict):
-    type_res = np.array(pred['Type'])
+    type_res = np.array(pred_dict['Type'])
     res = np.zeros(5)
     for pred_type in pred_types:
         res[pred_types_map[pred_type]] += int((type_res == pred_types_map[pred_type]).sum())

@@ -255,7 +255,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             f_file = np.array([os.path.join(rally_dir, f'{f_id}.png') for f_id in label_df['Frame']])
             x, y, v = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
             x_pred, y_pred, v_pred = np.array(pred_df['X']), np.array(pred_df['Y']), np.array(pred_df['Visibility'])
-            inpaint = np.array(pred_df['Inpainting'])
+            inpaint = np.array(pred_df['Inpaint_Mask'])
 
             # Sliding on the frame sequence
             last_idx = -1

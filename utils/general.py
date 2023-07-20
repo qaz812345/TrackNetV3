@@ -223,7 +223,7 @@ def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, 
 
 def write_pred_csv(pred_dict, save_file=None, save_inpaint_mask=False):
     if save_inpaint_mask:
-        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y'], 'Inpainting': pred_dict['Inpainting']})
+        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y'], 'Inpaint_Mask': pred_dict['Inpaint_Mask']})
     else:
         pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y']})
     pred_df.to_csv(save_file, index=False)
