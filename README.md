@@ -87,18 +87,18 @@ Shuttlecock_Trajectory_Dataset
 ### Train TrackNet
 * Train from scratch 
     ```
-    python train.py --model_name TrackNet --seq_len 8 --epochs 30 --batch_size 10 --bg_mode concat --alpha 0.5 --save_dir exp  --verbose
+    python train.py --model_name TrackNet --seq_len 8 --epochs 30 --batch_size 10 --bg_mode concat --alpha 0.5 --save_dir exp --verbose
     ```
 
 * Resume training (start from the last epoch to the specified epoch)
     ```
-    python train.py --model_name TrackNet --epochs 30 --save_dir exp --resume_training
+    python train.py --model_name TrackNet --epochs 30 --save_dir exp --resume_training --verbose
     ```
 
-### Inpainting Mask Generation
+### Generate Inpainting Mask
 * Generate predicted trajectories and inpainting mask
     ```
-    python generate_mask_data.py --model_file TrackNet_best.pt --batch_size 16
+    python generate_mask_data.py --tracknet_file TrackNet_best.pt --batch_size 16
     ```
 
 ### Train InpaintNet
@@ -118,12 +118,10 @@ Shuttlecock_Trajectory_Dataset
     python test.py --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir eval
     ```
 
-* Evaluate TrackNet on test set
+* Evaluate the TrackNet module on test set
     ```
     python test.py --tracknet_file TrackNet_best.pt --save_dir eval
     ```
-
-
 
 * Generate video with ground truth label and predicted result
     ```

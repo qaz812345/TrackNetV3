@@ -1,30 +1,87 @@
 import os
-import json
 import argparse
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 
 import torch
 from torch.utils.data import DataLoader
 
-from test import predict, get_ensemble_weight, generate_inpaint_mask
+from test import predict_location, get_ensemble_weight, generate_inpaint_mask
 from dataset import Shuttlecock_Trajectory_Dataset
 from utils.general import *
 
+
+def predict(indices, y_pred=None, c_pred=None, img_scaler=(1, 1)):
+    """ Predict coordinates from heatmap or inpainted coordinates. 
+
+        Args:
+            indices (torch.Tensor): indices of input sequence with shape (N, L, 2)
+            y_pred (torch.Tensor, optional): predicted heatmap sequence with shape (N, L, H, W)
+            c_pred (torch.Tensor, optional): predicted inpainted coordinates sequence with shape (N, L, 2)
+            img_scaler (Tuple): image scaler (w_scaler, h_scaler)
+
+        Returns:
+            pred_dict (Dict): dictionary of predicted coordinates
+                Format: {'Frame':[], 'X':[], 'Y':[], 'Visibility':[]}
+    """
+
+    pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[]}
+
+    batch_size, seq_len = indices.shape[0], indices.shape[1]
+    indices = indices.detach().cpu().numpy()if torch.is_tensor(indices) else indices.numpy()
+    
+    # Transform input for heatmap prediction
+    if y_pred is not None:
+        y_pred = y_pred > 0.5
+        y_pred = y_pred.detach().cpu().numpy() if torch.is_tensor(y_pred) else y_pred
+        y_pred = to_img_format(y_pred) # (N, L, H, W)
+    
+    # Transform input for coordinate prediction
+    if c_pred is not None:
+        c_pred = c_pred.detach().cpu().numpy() if torch.is_tensor(c_pred) else c_pred
+        c_pred[:, :, 0] = c_pred[:, :, 0] * WIDTH
+        c_pred[:, :, 1] = c_pred[:, :, 1] * HEIGHT 
+
+    prev_f_i = -1
+    for n in range(batch_size):
+        for f in range(seq_len):
+            f_i = indices[n][f][1]
+            if f_i != prev_f_i:
+                if c_pred is not None:
+                    # Predict from coordinate
+                    c_p = c_pred[n][f]
+                    cx_pred, cy_pred = int(c_p[0] * img_scaler[0]), int(c_p[1]* img_scaler[1]) 
+                elif y_pred is not None:
+                    # Predict from heatmap
+                    y_p = y_pred[n][f]
+                    cx_pred, cy_pred = predict_location(to_img(y_p))
+                    cx_pred, cy_pred = int(cx_pred*img_scaler[0]), int(cy_pred*img_scaler[1])
+                else:
+                    raise ValueError('Invalid input')
+                vis_pred = 0 if cx_pred == 0 and cy_pred == 0 else 1
+                pred_dict['Frame'].append(int(f_i))
+                pred_dict['X'].append(cx_pred)
+                pred_dict['Y'].append(cy_pred)
+                pred_dict['Visibility'].append(vis_pred)
+                prev_f_i = f_i
+            else:
+                break
+    
+    return pred_dict    
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--video_file', type=str)
-    parser.add_argument('--tracknet_file', type=str)
-    parser.add_argument('--inpaintnet_file', type=str, default='')
-    parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--eval_mode', type=str, default='weight', choices=['average', 'weight'])
-    parser.add_argument('--save_dir', type=str, default='pred_result')
-    parser.add_argument('--output_video', action='store_true', default=False)
-    parser.add_argument('--traj_len', type=int, default=8)
+    parser.add_argument('--video_file', type=str, help='file path of the video')
+    parser.add_argument('--tracknet_file', type=str, help='file path of the TrackNet model checkpoint')
+    parser.add_argument('--inpaintnet_file', type=str, default='', help='file path of the InpaintNet model checkpoint')
+    parser.add_argument('--batch_size', type=int, default=16, help='batch size for inference')
+    parser.add_argument('--eval_mode', type=str, default='weight', choices=['average', 'weight'], help='evaluation mode')
+    parser.add_argument('--save_dir', type=str, default='pred_result', help='directory to save the prediction result')
+    parser.add_argument('--output_video', action='store_true', default=False, help='whether to output video with predicted trajectory')
+    parser.add_argument('--traj_len', type=int, default=8, help='length of trajectory to draw on video')
     args = parser.parse_args()
 
-    num_workers = 8
+    num_workers = args.batch_size if args.batch_size <= 16 else 16
     video_name = args.video_file.split('/')[-1][:-4]
     out_csv_file = os.path.join(args.save_dir, f'{video_name}_ball.csv')
     out_video_file = os.path.join(args.save_dir, f'{video_name}.mp4')
@@ -38,14 +95,12 @@ if __name__ == '__main__':
     bg_mode = tracknet_ckpt['param_dict']['bg_mode']
     tracknet = get_model('TrackNet', tracknet_seq_len, bg_mode).cuda()
     tracknet.load_state_dict(tracknet_ckpt['model'])
-    tracknet.eval()
 
     if args.inpaintnet_file:
         inpaintnet_ckpt = torch.load(args.inpaintnet_file)
         inpaintnet_seq_len = inpaintnet_ckpt['param_dict']['seq_len']
         inpaintnet = get_model('InpaintNet').cuda()
         inpaintnet.load_state_dict(inpaintnet_ckpt['model'])
-        inpaintnet.eval()
     else:
         inpaintnet = None
 
@@ -59,29 +114,33 @@ if __name__ == '__main__':
                         'Img_scaler': (w_scaler, h_scaler), 'Img_shape': (w, h)}
 
     # Test on TrackNet
+    tracknet.eval()
     seq_len = tracknet_seq_len
     if args.eval_mode == 'nonoverlap':
-        # Non-overlap sliding window
+        # Create dataset with non-overlap sampling
         dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=seq_len, data_mode='heatmap', bg_mode=bg_mode,
-                                                frame_arr=np.array(frame_list)[:, :, :, ::-1], padding=True)
+                                                 frame_arr=np.array(frame_list)[:, :, :, ::-1], padding=True)
         data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
+
         for step, (i, x) in enumerate(tqdm(data_loader)):
             x = x.float().cuda()
             with torch.no_grad():
                 y_pred = tracknet(x).detach().cpu()
             
-            # predict
+            # Predict
             tmp_pred = predict(i, y_pred=y_pred, img_scaler=img_scaler)
             for key in tmp_pred.keys():
                 tracknet_pred_dict[key].extend(tmp_pred[key])
     else:
-        # Temporal ensemble
-        dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='heatmap', bg_mode=bg_mode, frame_arr=np.array(frame_list)[:, :, :, ::-1])
+        # Create dataset with overlap sampling for temporal ensemble
+        dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='heatmap', bg_mode=bg_mode,
+                                                 frame_arr=np.array(frame_list)[:, :, :, ::-1])
         data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
-        num_batch = len(data_loader)
+        
+        num_batch = len(data_loader) # for handling edge cases
         weight = get_ensemble_weight(seq_len, args.eval_mode)
 
-        # Init buffer which keep previous frame prediction
+        # Init prediction buffer params
         buffer_size = seq_len - 1
         batch_i = torch.arange(seq_len) # [0, 1, 2, 3, 4, 5, 6, 7]
         frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
@@ -112,6 +171,7 @@ if __name__ == '__main__':
                         ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
                         count -= 1
                     else:
+                        # General case
                         y_pred = (y_pred_buffer[batch_i+b, frame_i] * weight[:, None, None]).sum(0)
                         ensemble_i = torch.cat((ensemble_i, i[b][0].reshape(1, 1, 2)), dim=0)
                         ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
@@ -122,6 +182,7 @@ if __name__ == '__main__':
                         y_pred = y_pred_buffer[batch_i+b, frame_i].sum(0)
                         y_pred /= (b+1)
                     else:
+                        # General case
                         y_pred = (y_pred_buffer[batch_i+b, frame_i] * weight[:, None, None]).sum(0)
                     
                     ensemble_i = torch.cat((ensemble_i, i[b][0].reshape(1, 1, 2)), dim=0)
@@ -139,35 +200,38 @@ if __name__ == '__main__':
     if inpaintnet is not None:
         inpaintnet.eval()
         seq_len = inpaintnet_seq_len
-        tracknet_pred_dict['Inpaint_Mask'] = generate_inpaint_mask(tracknet_pred_dict, y_max=h, y_th_ratio=0.05)
+        tracknet_pred_dict['Inpaint_Mask'] = generate_inpaint_mask(tracknet_pred_dict, y_max=h, y_th_ratio=0.04)
         inpaint_pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[]}
 
         if args.eval_mode == 'nonoverlap':
-            # Non-overlap sliding window
+            # Create dataset with non-overlap sampling
             dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=seq_len, data_mode='coordinate', pred_dict=tracknet_pred_dict, padding=True)
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
+
             for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader)):
                 coor_pred, coor, inpaint_mask = coor_pred.float(), coor.float(), inpaint_mask.float()
                 with torch.no_grad():
                     coor_inpaint = inpaintnet(coor_pred.cuda(), inpaint_mask.cuda()).detach().cpu()
-                    coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask)
+                    coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask) # replace predicted coordinates with inpainted coordinates
                 
-                th_mask = ((coor_inpaint[:, :, 0] < COOR_TH) & (coor_inpaint[:, :, 1] < COOR_TH)) | (coor_inpaint[:, :, 0] > 1) | (coor_inpaint[:, :, 1] > 1) | (coor_inpaint[:, :, 0] < 0) | (coor_inpaint[:, :, 1] < 0)
+                # Thresholding
+                th_mask = ((coor_inpaint[:, :, 0] < COOR_TH) & (coor_inpaint[:, :, 1] < COOR_TH))
                 coor_inpaint[th_mask] = 0.
                 
-                # predict
+                # Predict
                 tmp_pred = predict(i, c_pred=coor_inpaint, img_scaler=img_scaler)
                 for key in tmp_pred.keys():
                     inpaint_pred_dict[key].extend(tmp_pred[key])
                 
         else:
-            # Temporal ensemble
+            # Create dataset with overlap sampling for temporal ensemble
             dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='coordinate', pred_dict=tracknet_pred_dict)
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
-            num_batch = len(data_loader)
+
+            num_batch = len(data_loader) # for handling edge cases
             weight = get_ensemble_weight(seq_len, args.eval_mode)
 
-            # Init buffer which keep previous frame prediction
+            # Init buffer params
             buffer_size = seq_len - 1
             batch_i = torch.arange(seq_len) # [0, 1, 2, 3, 4, 5, 6, 7]
             frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
@@ -180,7 +244,8 @@ if __name__ == '__main__':
                     coor_inpaint = inpaintnet(coor_pred.cuda(), inpaint_mask.cuda()).detach().cpu()
                     coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask)
                 
-                th_mask = ((coor_inpaint[:, :, 0] < COOR_TH) & (coor_inpaint[:, :, 1] < COOR_TH)) | (coor_inpaint[:, :, 0] > 1) | (coor_inpaint[:, :, 1] > 1) | (coor_inpaint[:, :, 0] < 0) | (coor_inpaint[:, :, 1] < 0)
+                # Thresholding
+                th_mask = ((coor_inpaint[:, :, 0] < COOR_TH) & (coor_inpaint[:, :, 1] < COOR_TH))
                 coor_inpaint[th_mask] = 0.
 
                 coor_inpaint_buffer = torch.cat((coor_inpaint_buffer, coor_inpaint), dim=0)
@@ -203,6 +268,7 @@ if __name__ == '__main__':
                             ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
                             count -= 1
                         else:
+                            # General case
                             coor_inpaint = (coor_inpaint_buffer[batch_i+b, frame_i] * weight[:, None]).sum(0)
                             ensemble_i = torch.cat((ensemble_i, i[b][0].view(1, 1, 2)), dim=0)
                             ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
@@ -213,12 +279,14 @@ if __name__ == '__main__':
                             coor_inpaint = coor_inpaint_buffer[batch_i+b, frame_i].sum(0)
                             coor_inpaint /= (b+1)
                         else:
+                            # General case
                             coor_inpaint = (coor_inpaint_buffer[batch_i+b, frame_i] * weight[:, None]).sum(0)
                         
                         ensemble_i = torch.cat((ensemble_i, i[b][0].view(1, 1, 2)), dim=0)
                         ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
 
-                th_mask = ((ensemble_coor_inpaint[:, :, 0] < COOR_TH) & (ensemble_coor_inpaint[:, :, 1] < COOR_TH)) | (ensemble_coor_inpaint[:, :, 0] > 1) | (ensemble_coor_inpaint[:, :, 1] > 1) | (ensemble_coor_inpaint[:, :, 0] < 0) | (ensemble_coor_inpaint[:, :, 1] < 0)
+                # Thresholding
+                th_mask = ((ensemble_coor_inpaint[:, :, 0] < COOR_TH) & (ensemble_coor_inpaint[:, :, 1] < COOR_TH))
                 ensemble_coor_inpaint[th_mask] = 0.
 
                 # Predict

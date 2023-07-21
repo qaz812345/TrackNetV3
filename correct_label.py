@@ -1,7 +1,6 @@
 import os
 import cv2
 import json
-import dash
 import parse
 import argparse
 import numpy as np
@@ -10,11 +9,12 @@ from PIL import Image
 
 import plotly.express as px
 import plotly.graph_objects as go
+import dash
 from dash import dcc, html
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output
 
-from dataset import Shuttlecock_Trajectory_Dataset, data_dir
+from dataset import data_dir
 from utils.general import *
 
 parser = argparse.ArgumentParser()
@@ -43,19 +43,23 @@ elif split == 'test':
     ]
 else:
     raise ValueError(f'Invalid split: {split}')
-print(eval_file_list)
+
 # Init global variables
 pred_types = ['TP', 'TN', 'FP1', 'FP2', 'FN']
 pred_types_map = {pred_type: i for i, pred_type in enumerate(pred_types)}
+prev_click = 0
 match_id, rally_id, frame_id = None, None, None
+x_gt, y_gt, vis_gt = None, None, None
+x_pred, y_pred, vis_pred = None, None, None
+x_correct, y_correct, vis_correct = None, None, None
 
-# Generatedrop down list values of rally id
+# Generate drop down list values of rally id
 rally_keys = []
 rally_dirs = get_rally_dirs(data_dir, split)
 rally_dirs = [os.path.join(data_dir, d) for d in rally_dirs]
-
 for rally_dir in rally_dirs:
-    _, match_id, rally_id = parse.parse('{}/match{}/frame/{}', rally_dir)
+    file_format_str = os.path.join('{}', 'match', '{}', 'frame', '{}')
+    _, match_id, rally_id = parse.parse(file_format_str, rally_dir)
     rally_keys.append(f'{match_id}_{rally_id}')
 rally_id_map = {k: i for i, k in enumerate(rally_keys)}
 
@@ -66,18 +70,10 @@ if split == 'test':
 else:
     start_f, end_f = None, None
 
-prev_click = None
-match_id, rally_id, frame_id = None, None, None
-x_gt, y_gt, vis_gt = None, None, None
-x_pred, y_pred, vis_pred = None, None, None
-x_correct, y_correct, vis_correct = None, None, None
-
-time_fig = go.Figure()
-frame_fig = go.Figure()
-
 # Create dash app
 app = dash.Dash(__name__)
 app.layout = html.Div(children=[
+    # Drop down lists
     html.Div(children=[
         html.Div(children=[
             html.Label(['Model:'], style={'font-weight': 'bold', "text-align": "center"}),
@@ -95,19 +91,21 @@ app.layout = html.Div(children=[
         html.Div(children=[
             dcc.Graph(
                 id='time_fig',
-                figure=time_fig,
+                figure=go.Figure(),
                 config={'scrollZoom':True}
             ),
         ], style=dict(width='90%')),
     ], style={'display':'flex', 'justify-content':'center', 'text-align':'center'}),
+    # Buttons
     html.Div(children=[
         html.Button('Write Result', id='write-btn', n_clicks=0, style={'width':'160px', 'height':'40px', 'margin': '10px'}),
         html.Button('Reset Label', id='reset-btn', n_clicks=0, style={'width':'160px', 'height':'40px', 'margin': '10px'})
     ], style={'display':'flex', 'justify-content': 'center', 'align-items': 'center'}),
+    # Frame plot
     html.Div(children=[
         dcc.Graph(
             id='frame_fig',
-            figure=frame_fig,
+            figure=go.Figure(),
             config={'scrollZoom':True}
         ),
     ], style={'display':'flex', 'justify-content':'center', 'align-items': 'center'}),
@@ -122,13 +120,12 @@ app.layout = html.Div(children=[
 def change_dropdown(eval_file, rally_key):
     global match_id, rally_id, x_gt, y_gt, vis_gt, x_pred, y_pred, vis_pred, x_correct, y_correct, vis_correct
     
-    print(f'File: {eval_file}')
-
     # Bar chart settings
     bar_width = 1
     y_min, y_max = - 0.2, 1.5
     colors = {'TP': '#65AD6C', 'TN': '#D47D7D', 'FP1': 'green', 'FP2': 'red', 'FN': 'blue'}
 
+    # Parse rally key
     rally_key_splits = rally_key.split('_')
     match_id, rally_id = rally_key_splits[0], '_'.join(rally_key_splits[1:])
 
@@ -141,21 +138,25 @@ def change_dropdown(eval_file, rally_key):
     x_correct, y_correct, vis_correct = np.array(gt_df['X']), np.array(gt_df['Y']), np.array(gt_df['Visibility'])
 
     # Read prediction results
+    print(f'File: {eval_file}')
     eval_dict = json.load(open(eval_file))['pred_dict'][rally_key]
     x_pred, y_pred, vis_pred = np.array(eval_dict['X']), np.array(eval_dict['Y']), np.array(eval_dict['Visibility'])
+
+    # Parse prediction result into stack bar chart data
     bar_list = {}
+    timestamp = np.arange(len(gt_df))
     for pred_type in pred_types:
         bar_list[pred_type] = (np.array(eval_dict['Type']) == pred_types_map[pred_type]).astype('int')
     bar_list['Error'] = bar_list['FN'] + bar_list['FP1'] + bar_list['FP2']
     bar_list['TP'] = bar_list['TP'] * y_min
     bar_list['TN'] = bar_list['TN'] * y_min
     
-    timestamp = np.arange(len(gt_df))
-    coor_data = np.stack([x_gt, y_gt, vis_gt, x_pred, y_pred, vis_pred], axis=1)
+    # Plot stack bar chart
+    hover_data = np.stack([x_gt, y_gt, vis_gt, x_pred, y_pred, vis_pred], axis=1)
     time_fig = go.Figure()
     for pred_type in pred_types: 
         time_fig.add_trace(
-            go.Bar(x=timestamp, y=bar_list[pred_type], customdata=coor_data,
+            go.Bar(x=timestamp, y=bar_list[pred_type], customdata=hover_data,
                    width=bar_width, marker_color=colors[pred_type], name=pred_type,
                    legendgroup=pred_type, showlegend=True),
         )
@@ -169,8 +170,9 @@ def change_dropdown(eval_file, rally_key):
 
     time_fig.update_yaxes(title_text='Error Count', range=[y_min, y_max], fixedrange=True)
     time_fig.update_xaxes(title_text='Frame ID')
-    time_fig.update_layout(barmode='stack', dragmode='pan', clickmode='event+select', margin={'l':20, 'r':20, 't':50, 'b':10}, height=300,
-                      title_text=f'Rally {rally_key} Error Distribution', title_x=0.5, legend_title='Error Type')
+    time_fig.update_layout(barmode='stack', dragmode='pan', clickmode='event+select',
+                           margin={'l':20, 'r':20, 't':50, 'b':10}, height=300,
+                           title_text=f'Rally {rally_key} Error Distribution', title_x=0.5, legend_title='Error Type')
     time_fig.update_traces(
         hovertemplate="<br>".join([
             "frame id: %{x}",
@@ -178,6 +180,7 @@ def change_dropdown(eval_file, rally_key):
             "pred: ( %{customdata[3]}, %{customdata[4]} ), vis: %{customdata[5]}",
         ])
     )
+
     return time_fig
 
 
@@ -186,8 +189,8 @@ def change_dropdown(eval_file, rally_key):
     Input('write-btn', 'n_clicks')
 )
 def save_corrected_result(n_clicks):
+    global match_id, rally_id, x_correct, y_correct, vis_correct
     if n_clicks:
-        global match_id, rally_id, x_correct, y_correct, vis_correct
         correct_dir = os.path.join(data_dir, split, f'match{match_id}', 'corrected_csv')
         if not os.path.exists(correct_dir):
             os.makedirs(correct_dir)
@@ -199,6 +202,7 @@ def save_corrected_result(n_clicks):
                            'Y': y_correct})
         df.to_csv(out_csv_file, index=False)
         print(f'{out_csv_file} saved')
+
         return f'{out_csv_file}_saved'
 
 
@@ -214,12 +218,16 @@ def show_frame(hoverData, clickData, n_clicks):
     marker_size = 10
     traj_len = 9
     frame_id = hoverData['points'][0]['x']
+
+    # Read frame image
     img_path = os.path.join(data_dir, split, f'match{match_id}', 'frame', f'{rally_id}', f'{frame_id}.png')
     assert os.path.exists(img_path), f'Image not found: {img_path}'
     img = cv2.imread(img_path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_fig = px.imshow(img)
+
     if prev_click != n_clicks:
+        # Reset corrected label
         prev_click = n_clicks
         x_correct[frame_id] = x_gt[frame_id]
         y_correct[frame_id] = y_gt[frame_id]
@@ -250,7 +258,8 @@ def show_frame(hoverData, clickData, n_clicks):
         frame_fig.update_layout(legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=0.5))
         return frame_fig
     if trigger == "frame_fig.clickData":
-        print(f'click_data: {clickData}')
+        # Show clicked point
+        #print(f'click_data: {clickData}')
         click_x = clickData['points'][0]['x']
         click_y = clickData['points'][0]['y']
         x_correct[frame_id] = click_x
@@ -287,7 +296,8 @@ def show_frame(hoverData, clickData, n_clicks):
         frame_fig.update_layout(legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=0.5))
         return frame_fig
     if trigger == "time_fig.hoverData":
-        print(f'hover_data: {hoverData}')
+        # Show hovered frame with neighbor labels
+        #print(f'hover_data: {hoverData}')
         selectedData = None
 
         frame_fig = go.Figure()

@@ -1,7 +1,6 @@
 import os
 import cv2
 import json
-import dash
 import parse
 import argparse
 import numpy as np
@@ -10,6 +9,7 @@ from PIL import Image
 
 import plotly.express as px
 import plotly.graph_objects as go
+import dash
 from dash import dcc, html
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output
@@ -38,8 +38,8 @@ elif split == 'val':
     ]
 elif split == 'test':
     eval_file_list = [
-        {'label': 'tracknet', 'value': 'test/tracknet_eval/test_eval_analysis_weight.json'},
-        {'label': 'tracknetv3', 'value': 'test/tracknetv3_eval/test_eval_analysis_weight.json'}
+        {'label': 'tracknet', 'value': 'test/concat_a0.5/eval/test_eval_analysis_weight.json'},
+        {'label': 'tracknetv3', 'value': 'test/concat_a0.5_inpaint/eval/test_eval_analysis_weight.json'}
     ]
 else:
     raise ValueError(f'Invalid split: {split}')
@@ -54,9 +54,9 @@ match_id, rally_id, frame_id = None, None, None
 rally_keys = []
 rally_dirs = get_rally_dirs(data_dir, split)
 rally_dirs = [os.path.join(data_dir, d) for d in rally_dirs]
-
 for rally_dir in rally_dirs:
-    _, match_id, rally_id = parse.parse('{}/match{}/frame/{}', rally_dir)
+    file_format_str = os.path.join('{}', 'match{}', 'frame', '{}')
+    _, match_id, rally_id = parse.parse(file_format_str, rally_dir)
     rally_keys.append(f'{match_id}_{rally_id}')
 rally_id_map = {k: i for i, k in enumerate(rally_keys)}
 
@@ -67,14 +67,10 @@ if split == 'test':
 else:
     start_f, end_f = None, None
 
-# Time series plot
-time_fig = go.Figure().set_subplots(rows=2, cols=1)
-frame_fig = go.Figure()
-
 # Create dash app
 app = dash.Dash(__name__)
 app.layout = html.Div(children=[
-    # Dropdown lists
+    # Drop down lists
     html.Div(children=[
         html.Div(children=[
             html.Label(['Result 1:'], style={'font-weight': 'bold', "text-align": "center"}),
@@ -94,15 +90,16 @@ app.layout = html.Div(children=[
         html.Div(children=[
             dcc.Graph(
                 id='time_fig',
-                figure=time_fig,
+                figure=go.Figure().set_subplots(rows=2, cols=1),
                 config={'scrollZoom':True}
             ),
         ], style=dict(width='90%')),
     ], style={'display':'flex', 'justify-content':'center', 'text-align':'center'}),
+    # Frame plot
     html.Div(children=[
         dcc.Graph(
             id='frame_fig',
-            figure=frame_fig,
+            figure=go.Figure(),
             config={'scrollZoom':True}
         ),
     ], style={'display':'flex', 'justify-content':'center', 'align-items': 'center'}),
@@ -112,30 +109,30 @@ app.layout = html.Div(children=[
 @app.callback(
     Output('time_fig', 'figure'),
     [Input('eval-file-1-dropdown', 'value'),
-    Input('eval-file-1-dropdown', 'label'),
     Input('eval-file-2-dropdown', 'value'),
-    Input('eval-file-2-dropdown', 'label'),
     Input('rally-key-dropdown', 'value')]
 )
-def change_dropdown(eval_file_1, eval_name_1, eval_file_2, eval_name_2, rally_key):
+def change_dropdown(eval_file_1, eval_file_2, rally_key):
     global match_id, rally_id
-
-    print(f'File 1: {eval_file_1}')
-    print(f'File 2: {eval_file_2}')
-
+    
     # Bar chart settings
     bar_width = 1
     y_min, y_max = - 0.2, 1.5
     colors = {'TP': '#65AD6C', 'TN': '#D47D7D', 'FP1': 'green', 'FP2': 'red', 'FN': 'blue'}
 
+    # Parse rally key
     rally_key_splits = rally_key.split('_')
     match_id, rally_id = rally_key_splits[0], '_'.join(rally_key_splits[1:])
     
     # Read prediction results
+    print(f'File 1: {eval_file_1}')
+    print(f'File 2: {eval_file_2}')
     eval_dict_1 = json.load(open(eval_file_1))['pred_dict'][rally_key]
     eval_dict_2 = json.load(open(eval_file_2))['pred_dict'][rally_key]
     x_pred_1, y_pred_1, vis_pred_1 = np.array(eval_dict_1['X']), np.array(eval_dict_1['Y']), np.array(eval_dict_1['Visibility'])
     x_pred_2, y_pred_2, vis_pred_2 = np.array(eval_dict_2['X']), np.array(eval_dict_2['Y']), np.array(eval_dict_2['Visibility'])
+
+    # Parse prediction result into stack bar chart data
     bar_list = [dict() for _ in range(2)]
     for i, eval_dict in [(0, eval_dict_1), (1, eval_dict_2)]:
         for pred_type in pred_types:
@@ -153,12 +150,12 @@ def change_dropdown(eval_file_1, eval_name_1, eval_file_2, eval_name_2, rally_ke
     
     # Time series plot
     timestamp = np.arange(len(label_df))
-    coor_data = np.stack([x, y, vis, x_pred_1, y_pred_1, vis_pred_1, x_pred_2, y_pred_2, vis_pred_2], axis=1)
-    time_fig = go.Figure().set_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=(eval_name_1, eval_name_2))
+    hover_data = np.stack([x, y, vis, x_pred_1, y_pred_1, vis_pred_1, x_pred_2, y_pred_2, vis_pred_2], axis=1)
+    time_fig = go.Figure().set_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=(eval_file_1, eval_file_2))
     for i, showlegend in [(0, True), (1, False)]:
         for pred_type in pred_types: 
             time_fig.add_trace(
-                go.Bar(x=timestamp, y=bar_list[i][pred_type], customdata=coor_data,
+                go.Bar(x=timestamp, y=bar_list[i][pred_type], customdata=hover_data,
                     width=bar_width, marker_color=colors[pred_type], name=pred_type, legendgroup=pred_type, showlegend=showlegend),
                 row=i+1, col=1
             )
@@ -191,8 +188,8 @@ def change_dropdown(eval_file_1, eval_name_1, eval_file_2, eval_name_2, rally_ke
 )
 def show_frame(hoverData):
     global match_id, rally_id
-    radius = 5
-    bbox_width = 1
+
+    radius, bbox_width = 5, 1
     
     #print(f'hover_data: {hoverData}')
     frame_id = hoverData['points'][0]['x']
@@ -200,7 +197,7 @@ def show_frame(hoverData):
     cx_pred_1, cy_pred_1 = hoverData['points'][0]['customdata'][3], hoverData['points'][0]['customdata'][4]
     cx_pred_2, cy_pred_2 = hoverData['points'][0]['customdata'][6], hoverData['points'][0]['customdata'][7]
     
-    # Read frame with specified frame id
+    # Read Read frame image
     img_path = os.path.join(data_dir, split, f'match{match_id}', 'frame', rally_id, f'{frame_id}.png')
     img = cv2.imread(img_path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -210,6 +207,8 @@ def show_frame(hoverData):
     # Frame plot
     frame_fig = go.Figure()
     frame_fig.add_trace(img_fig.data[0])
+
+    # Add button to show/hide bbox
     gt_bbox = [dict(type="rect", x0=cx-radius, y0=cy-radius, x1=cx+radius, y1=cy+radius, line=dict(color="red", width=bbox_width))]
     pred_bbox_1 = [dict(type="rect", x0=cx_pred_1-radius, y0=cy_pred_1-radius, x1=cx_pred_1+radius, y1=cy_pred_1+radius, line=dict(color="green", width=bbox_width))]
     pred_bbox_2 = [dict(type="rect", x0=cx_pred_2-radius, y0=cy_pred_2-radius, x1=cx_pred_2+radius, y1=cy_pred_2+radius, line=dict(color="blue", width=bbox_width))]
