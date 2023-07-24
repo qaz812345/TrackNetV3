@@ -213,6 +213,31 @@ def generate_frames(video_file):
             
     return frame_list, fps, (w, h)
 
+def draw_traj(img, traj, color):
+    """ Draw trajectory on the image.
+
+        Args:
+            img (numpy.ndarray): Image with shape (H, W, C)
+            traj (deque): Trajectory to draw
+
+        Returns:
+            img (numpy.ndarray): Image with trajectory drawn
+    """
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)   
+    img = Image.fromarray(img)
+    
+    for i in range(len(traj)):
+        if traj[i] is not None:
+            draw_x = traj[i][0]
+            draw_y = traj[i][1]
+            bbox =  (draw_x - 2, draw_y - 2, draw_x + 2, draw_y + 2)
+            draw = ImageDraw.Draw(img)
+            draw.ellipse(bbox, outline=color)
+            del draw
+    img =  cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+    return img
+
 def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, label_df=None):
     """ Write a video with prediction result.
 
@@ -262,32 +287,13 @@ def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, 
             gt_queue.appendleft([x[i], y[i]]) if vis[i] and i < len(label_df) else gt_queue.appendleft(None)
         pred_queue.appendleft([x_pred[i], y_pred[i]]) if vis_pred[i] else pred_queue.appendleft(None)
 
-        # Convert to PIL image for drawing
-        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)   
-        img = Image.fromarray(img)
-
         # Draw ground truth trajectory if exists
         if label_df is not None:
-            for i in range(len(gt_queue)):
-                if gt_queue[i] is not None:
-                    draw_x = gt_queue[i][0]
-                    draw_y = gt_queue[i][1]
-                    bbox =  (draw_x - 2, draw_y - 2, draw_x + 2, draw_y + 2)
-                    draw = ImageDraw.Draw(img)
-                    draw.ellipse(bbox, outline ='red')
+            frame = draw_traj(frame, gt_queue, color='red')
         
         # Draw prediction trajectory
-        for i in range(len(pred_queue)):
-            if pred_queue[i] is not None:
-                draw_x = pred_queue[i][0]
-                draw_y = pred_queue[i][1]
-                bbox =  (draw_x - 2, draw_y - 2, draw_x + 2, draw_y + 2)
-                draw = ImageDraw.Draw(img)
-                draw.ellipse(bbox, outline ='yellow')
-                del draw
+        frame = draw_traj(frame, pred_queue, color='yellow')
 
-        # Convert back to cv2 image and write to the output video
-        frame =  cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         out.write(frame)
     out.release()
 

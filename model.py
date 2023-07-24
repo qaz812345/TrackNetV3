@@ -54,7 +54,7 @@ class TrackNet(nn.Module):
         self.predictor = nn.Conv2d(64, out_dim, (1, 1))
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x, logit=False):
+    def forward(self, x):
         x1 = self.down_block_1(x)                                       # (N,   64,  288,   512)
         x = nn.MaxPool2d((2, 2), stride=(2, 2))(x1)                     # (N,   64,  144,   256)
         x2 = self.down_block_2(x)                                       # (N,  128,  144,   256)

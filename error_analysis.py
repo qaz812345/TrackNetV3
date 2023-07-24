@@ -38,8 +38,7 @@ elif split == 'val':
     ]
 elif split == 'test':
     eval_file_list = [
-        {'label': 'tracknet', 'value': 'test/concat_a0.5/eval/test_eval_analysis_weight.json'},
-        {'label': 'tracknetv3', 'value': 'test/concat_a0.5_inpaint/eval/test_eval_analysis_weight.json'}
+        # {'label': label_name, 'value': json_path},
     ]
 else:
     raise ValueError(f'Invalid split: {split}')
@@ -49,6 +48,9 @@ else:
 pred_types = ['TP', 'TN', 'FP1', 'FP2', 'FN']
 pred_types_map = {pred_type: i for i, pred_type in enumerate(pred_types)}
 match_id, rally_id, frame_id = None, None, None
+x_gt, y_gt = None, None
+x_pred_1, y_pred_1 = None, None
+x_pred_2, y_pred_2 = None, None
 
 # Generatedrop down list values of rally id
 rally_keys = []
@@ -113,7 +115,7 @@ app.layout = html.Div(children=[
     Input('rally-key-dropdown', 'value')]
 )
 def change_dropdown(eval_file_1, eval_file_2, rally_key):
-    global match_id, rally_id
+    global match_id, rally_id, x_gt, y_gt, x_pred_1, y_pred_1, x_pred_2, y_pred_2
     
     # Bar chart settings
     bar_width = 1
@@ -146,11 +148,11 @@ def change_dropdown(eval_file_1, eval_file_2, rally_key):
     assert os.path.exists(os.path.join(data_dir, split, f'match{match_id}', csv_dir, f'{rally_id}_ball.csv'))
     csv_file = os.path.join(data_dir, split, f'match{match_id}', csv_dir, f'{rally_id}_ball.csv')
     label_df = pd.read_csv(csv_file, encoding='utf8')
-    x, y, vis = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
+    x_gt, y_gt, vis_gt = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
     
     # Time series plot
     timestamp = np.arange(len(label_df))
-    hover_data = np.stack([x, y, vis, x_pred_1, y_pred_1, vis_pred_1, x_pred_2, y_pred_2, vis_pred_2], axis=1)
+    hover_data = np.stack([x_gt, y_gt, vis_gt, x_pred_1, y_pred_1, vis_pred_1, x_pred_2, y_pred_2, vis_pred_2], axis=1)
     time_fig = go.Figure().set_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=(eval_file_1, eval_file_2))
     for i, showlegend in [(0, True), (1, False)]:
         for pred_type in pred_types: 
@@ -187,16 +189,16 @@ def change_dropdown(eval_file_1, eval_file_2, rally_key):
     [Input('time_fig', 'hoverData'),]
 )
 def show_frame(hoverData):
-    global match_id, rally_id
-
-    radius, bbox_width = 5, 1
+    global match_id, rally_id, x_gt, y_gt, x_pred_1, y_pred_1, x_pred_2, y_pred_2
+    traj_len = 16
+    radius, bbox_width, marker_size = 5, 1, 10
     
     #print(f'hover_data: {hoverData}')
     frame_id = hoverData['points'][0]['x']
-    cx, cy = hoverData['points'][0]['customdata'][0], hoverData['points'][0]['customdata'][1]
-    cx_pred_1, cy_pred_1 = hoverData['points'][0]['customdata'][3], hoverData['points'][0]['customdata'][4]
-    cx_pred_2, cy_pred_2 = hoverData['points'][0]['customdata'][6], hoverData['points'][0]['customdata'][7]
-    
+    cx, cy = x_gt[frame_id], y_gt[frame_id]
+    cx_pred_1, cy_pred_1 = x_pred_1[frame_id], y_pred_1[frame_id]
+    cx_pred_2, cy_pred_2 = x_pred_2[frame_id], y_pred_2[frame_id]
+
     # Read Read frame image
     img_path = os.path.join(data_dir, split, f'match{match_id}', 'frame', rally_id, f'{frame_id}.png')
     img = cv2.imread(img_path)
@@ -209,7 +211,7 @@ def show_frame(hoverData):
     frame_fig.add_trace(img_fig.data[0])
 
     # Add button to show/hide bbox
-    gt_bbox = [dict(type="rect", x0=cx-radius, y0=cy-radius, x1=cx+radius, y1=cy+radius, line=dict(color="red", width=bbox_width))]
+    '''gt_bbox = [dict(type="rect", x0=cx-radius, y0=cy-radius, x1=cx+radius, y1=cy+radius, line=dict(color="red", width=bbox_width))]
     pred_bbox_1 = [dict(type="rect", x0=cx_pred_1-radius, y0=cy_pred_1-radius, x1=cx_pred_1+radius, y1=cy_pred_1+radius, line=dict(color="green", width=bbox_width))]
     pred_bbox_2 = [dict(type="rect", x0=cx_pred_2-radius, y0=cy_pred_2-radius, x1=cx_pred_2+radius, y1=cy_pred_2+radius, line=dict(color="blue", width=bbox_width))]
     frame_fig.update_layout(
@@ -225,11 +227,49 @@ def show_frame(hoverData):
                 ]
             )
         ]
+    )'''
+    
+    frame_fig.add_trace(
+        go.Scatter(x=x_pred_1[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
+                    y=y_pred_1[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
+                    marker_color=[f'rgba(0, {170+int(80/traj_len)*i}, 0, {0.3+int(0.6/traj_len)*i})' for i in range(traj_len)],
+                    text=[f for f in range(frame_id-int(traj_len/2), frame_id+int(traj_len/2)+1)],
+                    mode='markers', marker_size=marker_size, name='pred_1_traj', visible=True)
+    )
+    frame_fig.add_trace(
+        go.Scatter(x=x_pred_2[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
+                    y=y_pred_2[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
+                    marker_color=[f'rgba(0, 0, {170+int(80/traj_len)*i}, {0.3+int(0.6/traj_len)*i})' for i in range(traj_len)],
+                    text=[f for f in range(frame_id-int(traj_len/2), frame_id+int(traj_len/2)+1)],
+                    mode='markers', marker_size=marker_size, name='pred_2_traj', visible=True)
+    )
+    frame_fig.add_trace(
+        go.Scatter(x=x_gt[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
+                    y=y_gt[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
+                    marker_color=[f'rgba({170+int(80/traj_len)*i}, 0, 0, {0.3+int(0.6/traj_len)*i})' for i in range(traj_len)],
+                    text=[f for f in range(frame_id-int(traj_len/2), frame_id+int(traj_len/2)+1)],
+                    mode='markers', marker_size=marker_size, name='gt_traj', visible='legendonly')
+    )
+    frame_fig.add_trace(
+        go.Scatter(x=x_pred_1[frame_id:frame_id+1], y=y_pred_1[frame_id:frame_id+1],
+                    marker_color=['rgba(0, 255, 0, 0.5)'], text=[frame_id],
+                    mode='markers', marker_size=marker_size, name='pred_1', visible='legendonly')
+    )
+    frame_fig.add_trace(
+        go.Scatter(x=x_pred_2[frame_id:frame_id+1], y=y_pred_2[frame_id:frame_id+1],
+                    marker_color=['rgba(0, 0, 255, 0.5)'], text=[frame_id],
+                    mode='markers', marker_size=marker_size, name='pred_2', visible='legendonly')
+    )
+    frame_fig.add_trace(
+        go.Scatter(x=x_gt[frame_id:frame_id+1], y=y_gt[frame_id:frame_id+1],
+                    marker_color=['rgba(255, 0, 0, 0.5)'], text=[frame_id],
+                    mode='markers', marker_size=marker_size, name='gt')
     )
     frame_fig.update_layout(dragmode='pan', clickmode='event+select', autosize=False,
                             margin={'l':0, 'r':0, 't':50, 'b':0}, width=img_w, height=img_h,
                             title_text=f'f_{frame_id} label: ({cx}, {cy}), pred 1: ({cx_pred_1}, {cy_pred_1}), pred 2: ({cx_pred_2}, {cy_pred_2})', title_x=0.5)
-    
+    frame_fig.update_layout(legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=0.5))
+
     return frame_fig
 
 if __name__ == '__main__':
