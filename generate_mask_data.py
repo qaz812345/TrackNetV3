@@ -21,6 +21,8 @@ if __name__ == '__main__':
     param_dict['num_workers'] = args.batch_size
     param_dict['batch_size'] = args.batch_size
     param_dict['eval_mode'] = args.eval_mode
+    param_dict['debug'] = args.debug
+    param_dict['verbose'] = args.verbose
     param_dict['tracknet_seq_len'] = param_dict['seq_len']
     tracknet = get_model(param_dict['model_name'], param_dict['seq_len'], param_dict['bg_mode']).cuda()
     tracknet.load_state_dict(ckpt['model'])

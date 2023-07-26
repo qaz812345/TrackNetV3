@@ -133,10 +133,10 @@ def evaluate(indices, y_true=None, y_pred=None, c_true=None, c_pred=None, tolera
         assert y_true is None and y_pred is None, 'Invalid input'
         c_true = c_true.detach().cpu().numpy() if torch.is_tensor(c_true) else c_true
         c_pred = c_pred.detach().cpu().numpy() if torch.is_tensor(c_pred) else c_pred
-        c_true[:, :, 0] = c_true[:, :, 0] * WIDTH
-        c_true[:, :, 1] = c_true[:, :, 1] * HEIGHT
-        c_pred[:, :, 0] = c_pred[:, :, 0] * WIDTH
-        c_pred[:, :, 1] = c_pred[:, :, 1] * HEIGHT
+        c_true[..., 0] = c_true[..., 0] * WIDTH
+        c_true[..., 1] = c_true[..., 1] * HEIGHT
+        c_pred[..., 0] = c_pred[..., 0] * WIDTH
+        c_pred[..., 1] = c_pred[..., 1] * HEIGHT
 
     for n in range(batch_size):
         prev_d_i = [-1, -1] # for ignoring the same frame in sequence
@@ -201,8 +201,8 @@ def evaluate(indices, y_true=None, y_pred=None, c_true=None, c_pred=None, tolera
                 else:
                     raise ValueError('Invalid input')
                 pred_dict['Frame'].append(int(d_i[1]))
-                pred_dict['X'].append(int(cx_pred*img_scaler[0]))
-                pred_dict['Y'].append(int(cy_pred*img_scaler[1]))
+                pred_dict['X'].append(int(cx_pred)*img_scaler[0])
+                pred_dict['Y'].append(int(cy_pred)*img_scaler[1])
                 pred_dict['Visibility'].append(vis_pred)
                 prev_d_i = d_i
             else:
@@ -210,14 +210,13 @@ def evaluate(indices, y_true=None, y_pred=None, c_true=None, c_pred=None, tolera
     
     return pred_dict
 
-def generate_inpaint_mask(pred_dict, y_max, y_th_ratio=0.04):
+def generate_inpaint_mask(pred_dict, th_h=30):
     """ Generate inpaint mask form predicted trajectory.
 
         Args:
             pred_dict (Dict): Prediction result
                 Format: {'Frame':[], 'X':[], 'Y':[], 'Visibility':[]}
-            y_max (int): Max y coordinate of the original image size
-            y_th_ratio (float): Threshold ratio for y coordinate
+            th_h (float): Height threshold (pixels) for y coordinate
         
         Returns:
             inpaint_mask (List): Inpaint mask
@@ -227,7 +226,7 @@ def generate_inpaint_mask(pred_dict, y_max, y_th_ratio=0.04):
     inpaint_mask = np.zeros_like(y)
     i = 0 # index that ball start to disappear
     j = 0 # index that ball start to appear
-    threshold = y_max * y_th_ratio
+    threshold = th_h
     while j < len(vis_pred):
         while i < len(vis_pred) and vis_pred[i] == 1:
             i += 1
@@ -472,6 +471,9 @@ def test(model, split, param_dict, save_inpaint_mask=False):
     pred_dict = {}
     rally_dirs = get_rally_dirs(data_dir, split)
     rally_dirs = [os.path.join(data_dir, rally_dir) for rally_dir in rally_dirs]
+    if param_dict['debug']:
+        rally_dirs = rally_dirs[:1]
+    
     for rally_dir in rally_dirs:
         # Parse rally directory to form rally key
         file_format_str = os.path.join('{}', 'frame', '{}')
@@ -519,103 +521,183 @@ def test_rally(model, rally_dir, param_dict):
 
     tracknet, inpaintnet = model
     w, h = Image.open(os.path.join(rally_dir, '0.png')).size
-    w_scaler, h_scaler = WIDTH / w, HEIGHT / h
+    w_scaler, h_scaler = w / WIDTH, h / HEIGHT
 
     # Test on TrackNet
-    tracknet.eval()
-    seq_len = param_dict['tracknet_seq_len']
-    pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[], 'Type':[]}
+    if inpaintnet is None:
+        tracknet.eval()
+        seq_len = param_dict['tracknet_seq_len']
+        tracknet_pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[], 'Type':[]}
 
-    if param_dict['eval_mode'] == 'nonoverlap':
-        # Create dataset with non-overlap sampling
-        dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=seq_len, data_mode='heatmap', bg_mode=param_dict['bg_mode'], rally_dir=rally_dir, padding=True)
-        data_loader = DataLoader(dataset, batch_size=param_dict['batch_size'], shuffle=False, num_workers=param_dict['num_workers'], drop_last=False)
-        
-        data_prob = tqdm(data_loader) if param_dict['verbose'] else data_loader
-        for step, (i, x, y, _, _) in enumerate(data_prob):
-            x = x.float().cuda()
-            with torch.no_grad():
-                y_pred = tracknet(x).detach().cpu()
+        if param_dict['eval_mode'] == 'nonoverlap':
+            # Create dataset with non-overlap sampling
+            dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=seq_len, data_mode='heatmap', bg_mode=param_dict['bg_mode'], rally_dir=rally_dir, padding=True)
+            data_loader = DataLoader(dataset, batch_size=param_dict['batch_size'], shuffle=False, num_workers=param_dict['num_workers'], drop_last=False)
             
-            # Predict
-            tmp_pred = evaluate(i, y_true=y, y_pred=y_pred, tolerance=param_dict['tolerance'], img_scaler=(w_scaler, h_scaler))
-            for key in tmp_pred.keys():
-                pred_dict[key].extend(tmp_pred[key])
-    else:
-        # Create dataset with overlap sampling for temporal ensemble
-        dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='heatmap', bg_mode=param_dict['bg_mode'], rally_dir=rally_dir)
-        data_loader = DataLoader(dataset, batch_size=param_dict['batch_size'], shuffle=False, num_workers=param_dict['num_workers'], drop_last=False)
+            data_prob = tqdm(data_loader) if param_dict['verbose'] else data_loader
+            for step, (i, x, y, _, _) in enumerate(data_prob):
+                x = x.float().cuda()
+                with torch.no_grad():
+                    y_pred = tracknet(x).detach().cpu()
+                
+                # Predict
+                tmp_pred = evaluate(i, y_true=y, y_pred=y_pred, tolerance=param_dict['tolerance'], img_scaler=(w_scaler, h_scaler))
+                for key in tmp_pred.keys():
+                    tracknet_pred_dict[key].extend(tmp_pred[key])
+        else:
+            # Create dataset with overlap sampling for temporal ensemble
+            dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='heatmap', bg_mode=param_dict['bg_mode'], rally_dir=rally_dir)
+            data_loader = DataLoader(dataset, batch_size=param_dict['batch_size'], shuffle=False, num_workers=param_dict['num_workers'], drop_last=False)
+            weight = get_ensemble_weight(seq_len, param_dict['eval_mode'])
 
-        num_batch = len(data_loader) # for handling edge cases
-        weight = get_ensemble_weight(seq_len, param_dict['eval_mode'])
+            # Init buffer parameters
+            num_sample, sample_count = len(dataset), 0
+            buffer_size = seq_len - 1
+            batch_i = torch.arange(seq_len) # [0, 1, 2, 3, 4, 5, 6, 7]
+            frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
+            y_pred_buffer = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
 
-        # Init buffer parameters
-        buffer_size = seq_len - 1
-        batch_i = torch.arange(seq_len) # [0, 1, 2, 3, 4, 5, 6, 7]
-        frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
-        y_pred_buffer = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
+            data_prob = tqdm(data_loader) if param_dict['verbose'] else data_loader
+            for step, (i, x, y, _, _) in enumerate(data_prob):
+                x = x.float().cuda()
+                b_size, seq_len = i.shape[0], i.shape[1]
+                with torch.no_grad():
+                    y_pred = tracknet(x).detach().cpu()
+                
+                y_pred_buffer = torch.cat((y_pred_buffer, y_pred), dim=0)
+                ensemble_i = torch.empty((0, 1, 2), dtype=torch.float32)
+                ensemble_y = torch.empty((0, 1, HEIGHT, WIDTH), dtype=torch.float32)
+                ensemble_y_pred = torch.empty((0, 1, HEIGHT, WIDTH), dtype=torch.float32)
 
-        data_prob = tqdm(data_loader) if param_dict['verbose'] else data_loader
-        for step, (i, x, y, _, _) in enumerate(data_prob):
-            x = x.float().cuda()
-            b_size, seq_len = i.shape[0], i.shape[1]
-            with torch.no_grad():
-                y_pred = tracknet(x).detach().cpu()
-            
-            y_pred_buffer = torch.cat((y_pred_buffer, y_pred), dim=0)
-            ensemble_i = torch.empty((0, 1, 2), dtype=torch.float32)
-            ensemble_y = torch.empty((0, 1, HEIGHT, WIDTH), dtype=torch.float32)
-            ensemble_y_pred = torch.empty((0, 1, HEIGHT, WIDTH), dtype=torch.float32)
-
-            if step == num_batch-1:
-                # Last batch
-                y_zero_pad = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
-                y_pred_buffer = torch.cat((y_pred_buffer, y_zero_pad), dim=0)
-                count = buffer_size
-                for b in range(b_size+buffer_size):
-                    if b >= b_size:
-                        # Last input sequence
-                        y_pred = y_pred_buffer[batch_i+b, frame_i].sum(0)
-                        y_pred /= count
-                        frame_idx = seq_len-count
-                        ensemble_i = torch.cat((ensemble_i, i[-1][frame_idx].reshape(1, 1, 2)), dim=0)
-                        ensemble_y = torch.cat((ensemble_y, y[-1][frame_idx].reshape(1, 1, HEIGHT, WIDTH)), dim=0)
-                        ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
-                        count -= 1
-                    else:
-                        # General case
-                        y_pred = (y_pred_buffer[batch_i+b, frame_i] * weight[:, None, None]).sum(0)
-                        ensemble_i = torch.cat((ensemble_i, i[b][0].reshape(1, 1, 2)), dim=0)
-                        ensemble_y = torch.cat((ensemble_y, y[b][0].reshape(1, 1, HEIGHT, WIDTH)), dim=0)
-                        ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
-            else:
                 for b in range(b_size):
-                    if step == 0 and b < buffer_size:
-                        # First batch
+                    if sample_count < buffer_size:
+                        # Imcomplete buffer
                         y_pred = y_pred_buffer[batch_i+b, frame_i].sum(0)
-                        y_pred /= (b+1)
+                        y_pred /= (sample_count+1)
                     else:
                         # General case
                         y_pred = (y_pred_buffer[batch_i+b, frame_i] * weight[:, None, None]).sum(0)
-                    
+                        
                     ensemble_i = torch.cat((ensemble_i, i[b][0].reshape(1, 1, 2)), dim=0)
                     ensemble_y = torch.cat((ensemble_y, y[b][0].reshape(1, 1, HEIGHT, WIDTH)), dim=0)
                     ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
-                    
-            # Predict
-            tmp_pred = evaluate(ensemble_i, y_true=ensemble_y, y_pred=ensemble_y_pred,
-                               tolerance=param_dict['tolerance'], img_scaler=(w_scaler, h_scaler))
-            for key in tmp_pred.keys():
-                pred_dict[key].extend(tmp_pred[key])
+                    sample_count += 1
 
-            # Update buffer, keep last predictions for ensemble in next iteration
-            y_pred_buffer = y_pred_buffer[-(seq_len-1):]
+                    if sample_count == num_sample:
+                        # Last batch
+                        y_zero_pad = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
+                        y_pred_buffer = torch.cat((y_pred_buffer, y_zero_pad), dim=0)
+        
+                        for f in range(1, seq_len):
+                            # Last input sequence
+                            y_pred = y_pred_buffer[batch_i+b+f, frame_i].sum(0)
+                            y_pred /= (seq_len-f)
+                            ensemble_i = torch.cat((ensemble_i, i[-1][f].reshape(1, 1, 2)), dim=0)
+                            ensemble_y = torch.cat((ensemble_y, y[-1][f].reshape(1, 1, HEIGHT, WIDTH)), dim=0)
+                            ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
+                        
+                # Predict
+                tmp_pred = evaluate(ensemble_i, y_true=ensemble_y, y_pred=ensemble_y_pred, tolerance=param_dict['tolerance'], img_scaler=(w_scaler, h_scaler))
+                for key in tmp_pred.keys():
+                    tracknet_pred_dict[key].extend(tmp_pred[key])
+
+                # Update buffer, keep last predictions for ensemble in next iteration
+                y_pred_buffer = y_pred_buffer[-buffer_size:]
+        
+        return tracknet_pred_dict
+    else:
+        # Test on TrackNetV3 (TrackNet + InpaintNet)
+        tracknet.eval()
+        seq_len = param_dict['tracknet_seq_len']
+        tracknet_pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[], 'Type':[]}
+
+        if param_dict['eval_mode'] == 'nonoverlap':
+            # Create dataset with non-overlap sampling
+            dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=seq_len, data_mode='heatmap', bg_mode=param_dict['bg_mode'], rally_dir=rally_dir, padding=True)
+            data_loader = DataLoader(dataset, batch_size=param_dict['batch_size'], shuffle=False, num_workers=param_dict['num_workers'], drop_last=False)
+            
+            data_prob = tqdm(data_loader) if param_dict['verbose'] else data_loader
+            for step, (i, x, y, _, _) in enumerate(data_prob):
+                x = x.float().cuda()
+                with torch.no_grad():
+                    y_pred = tracknet(x).detach().cpu()
+                
+                # Predict
+                tmp_pred = evaluate(i, y_true=y, y_pred=y_pred, tolerance=param_dict['tolerance'])
+                for key in tmp_pred.keys():
+                    tracknet_pred_dict[key].extend(tmp_pred[key])
+        else:
+            # Create dataset with overlap sampling for temporal ensemble
+            dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='heatmap', bg_mode=param_dict['bg_mode'], rally_dir=rally_dir)
+            data_loader = DataLoader(dataset, batch_size=param_dict['batch_size'], shuffle=False, num_workers=param_dict['num_workers'], drop_last=False)
+            weight = get_ensemble_weight(seq_len, param_dict['eval_mode'])
+
+            # Init buffer parameters
+            num_sample, sample_count = len(dataset), 0
+            buffer_size = seq_len - 1
+            batch_i = torch.arange(seq_len) # [0, 1, 2, 3, 4, 5, 6, 7]
+            frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
+            y_pred_buffer = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
+
+            data_prob = tqdm(data_loader) if param_dict['verbose'] else data_loader
+            for step, (i, x, y, _, _) in enumerate(data_prob):
+                x = x.float().cuda()
+                b_size, seq_len = i.shape[0], i.shape[1]
+                with torch.no_grad():
+                    y_pred = tracknet(x).detach().cpu()
+                
+                y_pred_buffer = torch.cat((y_pred_buffer, y_pred), dim=0)
+                ensemble_i = torch.empty((0, 1, 2), dtype=torch.float32)
+                ensemble_y = torch.empty((0, 1, HEIGHT, WIDTH), dtype=torch.float32)
+                ensemble_y_pred = torch.empty((0, 1, HEIGHT, WIDTH), dtype=torch.float32)
+
+                for b in range(b_size):
+                    if sample_count < buffer_size:
+                        # Imcomplete buffer
+                        y_pred = y_pred_buffer[batch_i+b, frame_i].sum(0)
+                        y_pred /= (sample_count+1)
+                    else:
+                        # General case
+                        y_pred = (y_pred_buffer[batch_i+b, frame_i] * weight[:, None, None]).sum(0)
+                        
+                    ensemble_i = torch.cat((ensemble_i, i[b][0].reshape(1, 1, 2)), dim=0)
+                    ensemble_y = torch.cat((ensemble_y, y[b][0].reshape(1, 1, HEIGHT, WIDTH)), dim=0)
+                    ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
+                    sample_count += 1
+
+                    if sample_count == num_sample:
+                        # Last batch
+                        y_zero_pad = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
+                        y_pred_buffer = torch.cat((y_pred_buffer, y_zero_pad), dim=0)
+        
+                        for f in range(1, seq_len):
+                            # Last input sequence
+                            y_pred = y_pred_buffer[batch_i+b+f, frame_i].sum(0)
+                            y_pred /= (seq_len-f)
+                            ensemble_i = torch.cat((ensemble_i, i[-1][f].reshape(1, 1, 2)), dim=0)
+                            ensemble_y = torch.cat((ensemble_y, y[-1][f].reshape(1, 1, HEIGHT, WIDTH)), dim=0)
+                            ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
+                        
+                # Predict
+                tmp_pred = evaluate(ensemble_i, y_true=ensemble_y, y_pred=ensemble_y_pred, tolerance=param_dict['tolerance'])
+                for key in tmp_pred.keys():
+                    tracknet_pred_dict[key].extend(tmp_pred[key])
+
+                # Update buffer, keep last predictions for ensemble in next iteration
+                y_pred_buffer = y_pred_buffer[-buffer_size:]
+        
+        tracknet_pred_dict['Inpaint_Mask'] = generate_inpaint_mask(tracknet_pred_dict, th_h=30)
+
+        # Save temporary result
+        file_format_str = os.path.join('{}', 'frame', '{}')
+        match_dir, rally_id = parse.parse(file_format_str, rally_dir)
+        csv_file = os.path.join(match_dir, 'predicted_csv',f'{rally_id}_ball.csv')
+        write_pred_csv(tracknet_pred_dict, save_file=csv_file, save_inpaint_mask=True)
     
-    # Test on TrackNetV3 (TrackNet + InpaintNet)
-    if inpaintnet is not None:
+        
         inpaintnet.eval()
         seq_len = param_dict['inpaintnet_seq_len']
-        pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[], 'Type':[]}
+        inpaintnet_pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[], 'Type':[]}
 
         if param_dict['eval_mode'] == 'nonoverlap':
             # Create dataset with non-overlap sampling
@@ -636,16 +718,15 @@ def test_rally(model, rally_dir, param_dict):
                 # Predict
                 tmp_pred = evaluate(i, c_true=coor, c_pred=coor_inpaint, tolerance=param_dict['tolerance'], img_scaler=(w_scaler, h_scaler))
                 for key in tmp_pred.keys():
-                    pred_dict[key].extend(tmp_pred[key])
+                    inpaintnet_pred_dict[key].extend(tmp_pred[key])
         else:
             # Create dataset with overlap sampling for temporal ensemble
             dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='coordinate', rally_dir=rally_dir)
             data_loader = DataLoader(dataset, batch_size=param_dict['batch_size'], shuffle=False, num_workers=param_dict['num_workers'], drop_last=False)
-
-            num_batch = len(data_loader)
             weight = get_ensemble_weight(seq_len, param_dict['eval_mode'])
 
             # Init buffer params
+            num_sample, sample_count = len(dataset), 0
             buffer_size = seq_len - 1
             batch_i = torch.arange(seq_len) # [0, 1, 2, 3, 4, 5, 6, 7]
             frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
@@ -657,7 +738,7 @@ def test_rally(model, rally_dir, param_dict):
                 b_size = i.shape[0]
                 with torch.no_grad():
                     coor_inpaint = inpaintnet(coor_pred.cuda(), inpaint_mask.cuda()).detach().cpu()
-                    coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask) # replace predicted coordinates with inpainted coordinates
+                    coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1 - inpaint_mask) # replace predicted coordinates with inpainted coordinates
                 
                 # Thresholding
                 th_mask = ((coor_inpaint[:, :, 0] < COOR_TH) & (coor_inpaint[:, :, 1] < COOR_TH))
@@ -668,59 +749,46 @@ def test_rally(model, rally_dir, param_dict):
                 ensemble_coor = torch.empty((0, 1, 2), dtype=torch.float32)
                 ensemble_coor_inpaint = torch.empty((0, 1, 2), dtype=torch.float32)
                 
-                if step == num_batch-1:
-                    # Last batch
-                    coor_zero_pad = torch.zeros((buffer_size, seq_len, 2), dtype=torch.float32)
-                    coor_inpaint_buffer = torch.cat((coor_inpaint_buffer, coor_zero_pad), dim=0)
-                    count = buffer_size
-                    for b in range(b_size+buffer_size):
-                        if b >= b_size:
-                            # Last input sequence
-                            coor_inpaint = coor_inpaint_buffer[batch_i+b, frame_i].sum(0)
-                            coor_inpaint /= count
-                            frame_idx = seq_len-count
-                            ensemble_i = torch.cat((ensemble_i, i[-1][frame_idx].view(1, 1, 2)), dim=0)
-                            ensemble_coor = torch.cat((ensemble_coor, coor[-1][frame_idx].view(1, 1, 2)), dim=0)
-                            ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
-                            count -= 1
-                        else:
-                            # General case
-                            coor_inpaint = (coor_inpaint_buffer[batch_i+b, frame_i] * weight[:, None]).sum(0)
-                            ensemble_i = torch.cat((ensemble_i, i[b][0].view(1, 1, 2)), dim=0)
-                            ensemble_coor = torch.cat((ensemble_coor, coor[b][0].view(1, 1, 2)), dim=0)
-                            ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
-                else:
-                    for b in range(b_size):
-                        if step == 0 and b < buffer_size:
-                            # First batch
-                            coor_inpaint = coor_inpaint_buffer[batch_i+b, frame_i].sum(0)
-                            coor_inpaint /= (b+1)
-                        else:
-                            # General case
-                            coor_inpaint = (coor_inpaint_buffer[batch_i+b, frame_i] * weight[:, None]).sum(0)
+                for b in range(b_size):
+                    if sample_count < buffer_size:
+                        # Imcomplete buffer
+                        coor_inpaint = coor_inpaint_buffer[batch_i+b, frame_i].sum(0)
+                        coor_inpaint /= (sample_count+1)  
+                    else:
+                        # General case
+                        coor_inpaint = (coor_inpaint_buffer[batch_i+b, frame_i] * weight[:, None]).sum(0)
+                    
+                    ensemble_i = torch.cat((ensemble_i, i[b][0].view(1, 1, 2)), dim=0)
+                    ensemble_coor = torch.cat((ensemble_coor, coor[b][0].view(1, 1, 2)), dim=0)
+                    ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
+                    sample_count += 1
+                
+                    if sample_count == num_sample:
+                        # Last input sequence
+                        coor_zero_pad = torch.zeros((buffer_size, seq_len, 2), dtype=torch.float32)
+                        coor_inpaint_buffer = torch.cat((coor_inpaint_buffer, coor_zero_pad), dim=0)
                         
-                        ensemble_i = torch.cat((ensemble_i, i[b][0].view(1, 1, 2)), dim=0)
-                        ensemble_coor = torch.cat((ensemble_coor, coor[b][0].view(1, 1, 2)), dim=0)
-                        ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
-
+                        for f in range(1, seq_len):
+                            coor_inpaint = coor_inpaint_buffer[batch_i+b+f, frame_i].sum(0)
+                            coor_inpaint /= (seq_len-f)
+                            ensemble_i = torch.cat((ensemble_i, i[b][f].view(1, 1, 2)), dim=0)
+                            ensemble_coor = torch.cat((ensemble_coor, coor[b][f].view(1, 1, 2)), dim=0)
+                            ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
+                
                 # Thresholding
                 th_mask = ((ensemble_coor_inpaint[:, :, 0] < COOR_TH) & (ensemble_coor_inpaint[:, :, 1] < COOR_TH))
                 ensemble_coor_inpaint[th_mask] = 0.
 
                 # Predict
-                tmp_pred = evaluate(ensemble_i, c_true=ensemble_coor, c_pred=ensemble_coor_inpaint,
-                                    tolerance=param_dict['tolerance'], img_scaler=(w_scaler, h_scaler))
+                tmp_pred = evaluate(ensemble_i, c_true=ensemble_coor, c_pred=ensemble_coor_inpaint, tolerance=param_dict['tolerance'], img_scaler=(w_scaler, h_scaler))
                 for key in tmp_pred.keys():
-                    pred_dict[key].extend(tmp_pred[key])
+                    inpaintnet_pred_dict[key].extend(tmp_pred[key])
 
                 # Update buffer, keep last predictions for ensemble in next iteration
-                coor_inpaint_buffer = coor_inpaint_buffer[-(seq_len-1):]
+                coor_inpaint_buffer = coor_inpaint_buffer[-buffer_size:]
 
-        return pred_dict
-    else:
-        pred_dict['Inpaint_Mask'] = generate_inpaint_mask(pred_dict, y_max=h, y_th_ratio=0.04)
-
-        return pred_dict
+        return inpaintnet_pred_dict
+        
 
 
 if __name__ == '__main__':

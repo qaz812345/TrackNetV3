@@ -69,9 +69,6 @@ Shuttlecock_Trajectory_Dataset
     |   │       └── *_**_**.mp4
     |   ├── match2/
     |   │ ⋮
-    |   ├── match15/
-    |   ├── match24/
-    |   ├── match25/
     |   └── match26/
     ├─ val
     |   ├── match1/

@@ -648,8 +648,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             # Normalization
             coor[:, 0] = coor[:, 0] / w
             coor[:, 1] = coor[:, 1] / h
-            coor_pred[:, 0] = coor_pred[:, 0] / w
-            coor_pred[:, 1] = coor_pred[:, 1] / h
+            coor_pred[:, 0] = coor_pred[:, 0] / self.WIDTH
+            coor_pred[:, 1] = coor_pred[:, 1] / self.HEIGHT
 
             return data_idx, coor_pred, coor, vis_pred.reshape(-1, 1), vis.reshape(-1, 1), inpaint.reshape(-1, 1)
         else:

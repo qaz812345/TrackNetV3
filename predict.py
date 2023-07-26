@@ -39,8 +39,6 @@ def predict(indices, y_pred=None, c_pred=None, img_scaler=(1, 1)):
     # Transform input for coordinate prediction
     if c_pred is not None:
         c_pred = c_pred.detach().cpu().numpy() if torch.is_tensor(c_pred) else c_pred
-        c_pred[:, :, 0] = c_pred[:, :, 0] * WIDTH
-        c_pred[:, :, 1] = c_pred[:, :, 1] * HEIGHT 
 
     prev_f_i = -1
     for n in range(batch_size):
@@ -50,7 +48,7 @@ def predict(indices, y_pred=None, c_pred=None, img_scaler=(1, 1)):
                 if c_pred is not None:
                     # Predict from coordinate
                     c_p = c_pred[n][f]
-                    cx_pred, cy_pred = int(c_p[0] * img_scaler[0]), int(c_p[1]* img_scaler[1]) 
+                    cx_pred, cy_pred = int(c_p[0] * WIDTH * img_scaler[0]), int(c_p[1] * HEIGHT* img_scaler[1]) 
                 elif y_pred is not None:
                     # Predict from heatmap
                     y_p = y_pred[n][f]
@@ -136,11 +134,10 @@ if __name__ == '__main__':
         dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='heatmap', bg_mode=bg_mode,
                                                  frame_arr=np.array(frame_list)[:, :, :, ::-1])
         data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
-        
-        num_batch = len(data_loader) # for handling edge cases
         weight = get_ensemble_weight(seq_len, args.eval_mode)
 
         # Init prediction buffer params
+        num_sample, sample_count = len(dataset), 0
         buffer_size = seq_len - 1
         batch_i = torch.arange(seq_len) # [0, 1, 2, 3, 4, 5, 6, 7]
         frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
@@ -156,51 +153,44 @@ if __name__ == '__main__':
             ensemble_i = torch.empty((0, 1, 2), dtype=torch.float32)
             ensemble_y_pred = torch.empty((0, 1, HEIGHT, WIDTH), dtype=torch.float32)
 
-            if step == num_batch-1:
-                # Last batch
-                y_zero_pad = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
-                y_pred_buffer = torch.cat((y_pred_buffer, y_zero_pad), dim=0)
-                count = buffer_size
-                for b in range(b_size+buffer_size):
-                    if b >= b_size:
+            for b in range(b_size):
+                if sample_count < buffer_size:
+                    # Imcomplete buffer
+                    y_pred = y_pred_buffer[batch_i+b, frame_i].sum(0)
+                    y_pred /= (sample_count+1)
+                else:
+                    # General case
+                    y_pred = (y_pred_buffer[batch_i+b, frame_i] * weight[:, None, None]).sum(0)
+                
+                ensemble_i = torch.cat((ensemble_i, i[b][0].reshape(1, 1, 2)), dim=0)
+                ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
+                sample_count += 1
+
+                if sample_count == num_sample:
+                    # Last batch
+                    y_zero_pad = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
+                    y_pred_buffer = torch.cat((y_pred_buffer, y_zero_pad), dim=0)
+
+                    for f in range(1, seq_len):
                         # Last input sequence
-                        y_pred = y_pred_buffer[batch_i+b, frame_i].sum(0)
-                        y_pred /= count
-                        frame_idx = seq_len-count
-                        ensemble_i = torch.cat((ensemble_i, i[-1][frame_idx].reshape(1, 1, 2)), dim=0)
+                        y_pred = y_pred_buffer[batch_i+b+f, frame_i].sum(0)
+                        y_pred /= (seq_len-f)
+                        ensemble_i = torch.cat((ensemble_i, i[-1][f].reshape(1, 1, 2)), dim=0)
                         ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
-                        count -= 1
-                    else:
-                        # General case
-                        y_pred = (y_pred_buffer[batch_i+b, frame_i] * weight[:, None, None]).sum(0)
-                        ensemble_i = torch.cat((ensemble_i, i[b][0].reshape(1, 1, 2)), dim=0)
-                        ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
-            else:
-                for b in range(b_size):
-                    if step == 0 and b < buffer_size:
-                        # First batch
-                        y_pred = y_pred_buffer[batch_i+b, frame_i].sum(0)
-                        y_pred /= (b+1)
-                    else:
-                        # General case
-                        y_pred = (y_pred_buffer[batch_i+b, frame_i] * weight[:, None, None]).sum(0)
-                    
-                    ensemble_i = torch.cat((ensemble_i, i[b][0].reshape(1, 1, 2)), dim=0)
-                    ensemble_y_pred = torch.cat((ensemble_y_pred, y_pred.reshape(1, 1, HEIGHT, WIDTH)), dim=0)
-                    
+
             # Predict
             tmp_pred = predict(ensemble_i, y_pred=ensemble_y_pred, img_scaler=img_scaler)
             for key in tmp_pred.keys():
                 tracknet_pred_dict[key].extend(tmp_pred[key])
 
             # Update buffer, keep last predictions for ensemble in next iteration
-            y_pred_buffer = y_pred_buffer[-(seq_len-1):]
+            y_pred_buffer = y_pred_buffer[-buffer_size:]
 
     # Test on TrackNetV3 (TrackNet + InpaintNet)
     if inpaintnet is not None:
         inpaintnet.eval()
         seq_len = inpaintnet_seq_len
-        tracknet_pred_dict['Inpaint_Mask'] = generate_inpaint_mask(tracknet_pred_dict, y_max=h, y_th_ratio=0.04)
+        tracknet_pred_dict['Inpaint_Mask'] = generate_inpaint_mask(tracknet_pred_dict, th_h=h*0.05)
         inpaint_pred_dict = {'Frame':[], 'X':[], 'Y':[], 'Visibility':[]}
 
         if args.eval_mode == 'nonoverlap':
@@ -227,11 +217,10 @@ if __name__ == '__main__':
             # Create dataset with overlap sampling for temporal ensemble
             dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=1, data_mode='coordinate', pred_dict=tracknet_pred_dict)
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
-
-            num_batch = len(data_loader) # for handling edge cases
             weight = get_ensemble_weight(seq_len, args.eval_mode)
 
             # Init buffer params
+            num_sample, sample_count = len(dataset), 0
             buffer_size = seq_len - 1
             batch_i = torch.arange(seq_len) # [0, 1, 2, 3, 4, 5, 6, 7]
             frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
@@ -252,38 +241,29 @@ if __name__ == '__main__':
                 ensemble_i = torch.empty((0, 1, 2), dtype=torch.float32)
                 ensemble_coor_inpaint = torch.empty((0, 1, 2), dtype=torch.float32)
                 
-                if step == num_batch-1:
-                    # Last batch
-                    coor_zero_pad = torch.zeros((buffer_size, seq_len, 2), dtype=torch.float32)
-                    coor_inpaint_buffer = torch.cat((coor_inpaint_buffer, coor_zero_pad), dim=0)
-                    count = buffer_size
-                    for b in range(b_size+buffer_size):
-                        if b >= b_size:
-                            # Last input sequence
-                            coor_inpaint = coor_inpaint_buffer[batch_i+b, frame_i].sum(0)
-                            coor_inpaint /= count
-                            
-                            frame_idx = seq_len-count
-                            ensemble_i = torch.cat((ensemble_i, i[-1][frame_idx].view(1, 1, 2)), dim=0)
-                            ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
-                            count -= 1
-                        else:
-                            # General case
-                            coor_inpaint = (coor_inpaint_buffer[batch_i+b, frame_i] * weight[:, None]).sum(0)
-                            ensemble_i = torch.cat((ensemble_i, i[b][0].view(1, 1, 2)), dim=0)
-                            ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
-                else:
-                    for b in range(b_size):
-                        if step == 0 and b < buffer_size:
-                            # First batch
-                            coor_inpaint = coor_inpaint_buffer[batch_i+b, frame_i].sum(0)
-                            coor_inpaint /= (b+1)
-                        else:
-                            # General case
-                            coor_inpaint = (coor_inpaint_buffer[batch_i+b, frame_i] * weight[:, None]).sum(0)
+                for b in range(b_size):
+                    if sample_count < buffer_size:
+                        # Imcomplete buffer
+                        coor_inpaint = coor_inpaint_buffer[batch_i+b, frame_i].sum(0)
+                        coor_inpaint /= (sample_count+1)
+                    else:
+                        # General case
+                        coor_inpaint = (coor_inpaint_buffer[batch_i+b, frame_i] * weight[:, None]).sum(0)
+                    
+                    ensemble_i = torch.cat((ensemble_i, i[b][0].view(1, 1, 2)), dim=0)
+                    ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
+                    sample_count += 1
+
+                    if sample_count == num_sample:
+                        # Last input sequence
+                        coor_zero_pad = torch.zeros((buffer_size, seq_len, 2), dtype=torch.float32)
+                        coor_inpaint_buffer = torch.cat((coor_inpaint_buffer, coor_zero_pad), dim=0)
                         
-                        ensemble_i = torch.cat((ensemble_i, i[b][0].view(1, 1, 2)), dim=0)
-                        ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
+                        for f in range(1, seq_len):
+                            coor_inpaint = coor_inpaint_buffer[batch_i+b+f, frame_i].sum(0)
+                            coor_inpaint /= (seq_len-f)
+                            ensemble_i = torch.cat((ensemble_i, i[-1][f].view(1, 1, 2)), dim=0)
+                            ensemble_coor_inpaint = torch.cat((ensemble_coor_inpaint, coor_inpaint.view(1, 1, 2)), dim=0)
 
                 # Thresholding
                 th_mask = ((ensemble_coor_inpaint[:, :, 0] < COOR_TH) & (ensemble_coor_inpaint[:, :, 1] < COOR_TH))
@@ -295,7 +275,7 @@ if __name__ == '__main__':
                     inpaint_pred_dict[key].extend(tmp_pred[key])
                 
                 # Update buffer, keep last predictions for ensemble in next iteration
-                coor_inpaint_buffer = coor_inpaint_buffer[-(seq_len-1):]
+                coor_inpaint_buffer = coor_inpaint_buffer[-buffer_size:]
         
 
     # Write csv file
