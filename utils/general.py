@@ -1,5 +1,6 @@
 import os
 import cv2
+import json
 import math
 import parse
 import shutil
@@ -9,7 +10,6 @@ import pandas as pd
 from collections import deque
 from PIL import Image, ImageDraw
 from model import TrackNet, InpaintNet
-
 
 # Global variables
 HEIGHT = 288
@@ -213,7 +213,7 @@ def generate_frames(video_file):
             
     return frame_list, fps, (w, h)
 
-def draw_traj(img, traj, color):
+def draw_traj(img, traj, radius=3, color='red'):
     """ Draw trajectory on the image.
 
         Args:
@@ -230,9 +230,9 @@ def draw_traj(img, traj, color):
         if traj[i] is not None:
             draw_x = traj[i][0]
             draw_y = traj[i][1]
-            bbox =  (draw_x - 2, draw_y - 2, draw_x + 2, draw_y + 2)
+            bbox =  (draw_x - radius, draw_y - radius, draw_x + radius, draw_y + radius)
             draw = ImageDraw.Draw(img)
-            draw.ellipse(bbox, outline=color)
+            draw.ellipse(bbox, fill='rgb(255,255,255)', outline=color)
             del draw
     img =  cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
@@ -315,12 +315,76 @@ def write_pred_csv(pred_dict, save_file, save_inpaint_mask=False):
     """
 
     if save_inpaint_mask:
-        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y'], 'Inpaint_Mask': pred_dict['Inpaint_Mask']})
+        # Save temporary data for InpaintNet training
+        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'],
+                                'Visibility_GT': pred_dict['Visibility_GT'],
+                                'X_GT': pred_dict['X_GT'],
+                                'Y_GT': pred_dict['Y_GT'],
+                                'Visibility': pred_dict['Visibility'],
+                                'X': pred_dict['X'], 
+                                'Y': pred_dict['Y'],
+                                'Inpaint_Mask': pred_dict['Inpaint_Mask']})
     else:
-        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'], 'Visibility': pred_dict['Visibility'], 'X': pred_dict['X'], 'Y': pred_dict['Y']})
+        pred_df = pd.DataFrame({'Frame': pred_dict['Frame'],
+                                'Visibility': pred_dict['Visibility'],
+                                'X': pred_dict['X'],
+                                'Y': pred_dict['Y']})
     pred_df.to_csv(save_file, index=False)
     
+def convert_gt_to_coco_json(data_dir, split, drop=False):
+    """ Convert ground truth csv file to coco format json file.
 
+        Args:
+            split (str): Split name
+        
+        Returns:
+            None
+    """
+    if split == 'test' and drop:
+        drop_frame_dict = json.load(open(os.path.join(data_dir, 'drop_frame.json')))
+        start_frame, end_frame = drop_frame_dict['start'], drop_frame_dict['end']
+    bbox_size = 10
+    rally_dirs = get_rally_dirs(data_dir, split)
+    rally_dirs = [os.path.join(data_dir, rally_dir) for rally_dir in rally_dirs]
+    image_info = []
+    annotations = []
+    sample_count = 0
+    for rally_dir in rally_dirs:
+        file_format_str = os.path.join('{}', 'frame', '{}')
+        match_dir, rally_id = parse.parse(file_format_str, rally_dir)
+        match_id = match_dir.split('match')[-1]
+        csv_file = os.path.join(match_dir, 'corrected_csv', f'{rally_id}_ball.csv') if split == 'test' else os.path.join(match_dir, 'csv', f'{rally_id}_ball.csv')
+        label_df = pd.read_csv(csv_file, encoding='utf8')
+        f, x, y, v = label_df['Frame'].values, label_df['X'].values, label_df['Y'].values, label_df['Visibility'].values
+        if split == 'test' and drop:
+            rally_key = f'{match_id}_{rally_id}'
+            start_f, end_f = start_frame[rally_key], end_frame[rally_key]
+            f, x, y, v = f[start_f:end_f] ,x[start_f:end_f], y[start_f:end_f], v[start_f:end_f]
+        w, h = Image.open(f'{match_dir}/frame/{rally_id}/0.png').size
+        for i, cx, cy, vis in zip(f, x, y, v):
+            image_info.append({'id': sample_count, 'width': w, 'height': h, 'file_name': f'{match_dir}/frame/{rally_id}/{i}.png'})
+            if vis > 0:
+                annotations.append({'id': sample_count,
+                                    'image_id': sample_count,
+                                    'category_id': 1,
+                                    'bbox': [int(cx-bbox_size/2), int(cy-bbox_size/2), bbox_size, bbox_size],
+                                    'ignore': 0,
+                                    'area': bbox_size*bbox_size,
+                                    'segmentation': [],
+                                    'iscrowd': 0})
+            sample_count += 1
+
+
+    coco_data = {
+        'info': {},
+        'licenses': [],
+        'categories': [{'id': 1, 'name': 'shuttlecock'}],
+        'images': image_info,
+        'annotations': annotations,
+    }
+    with open(f'{data_dir}/coco_format_gt.json', 'w') as f:
+        json.dump(coco_data, f)
+    
 ################################ Preprocessing Functions ################################
 def generate_data_frames(video_file):
     """ Sample frames from the videos in the dataset.
@@ -437,3 +501,15 @@ def get_rally_median(video_file):
     # Calculate the median of all frames
     median = np.median(np.array(frames), 0)[..., ::-1] # BGR to RGB
     np.savez(os.path.join(save_dir, 'median.npz'), median=median) # Must be lossless, do not save as image format
+
+def re_generate_median_files(data_dir):
+    for split in ['train', 'val', 'test']:
+        match_dirs = list_dirs(os.path.join(data_dir, split))
+        for match_dir in match_dirs:
+            match_name = match_dir.split('/')[-1]
+            video_files = list_dirs(os.path.join(match_dir, 'video'))
+            for video_file in video_files:
+                print(f'Processing {video_file}...')
+                get_rally_median(video_file)
+            get_match_median(match_dir)
+            print(f'Finish processing {match_name}.')

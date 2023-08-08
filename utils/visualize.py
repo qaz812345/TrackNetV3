@@ -2,7 +2,10 @@ import os
 import cv2
 import parse
 import numpy as np
+import matplotlib.pyplot as plt
 from PIL import Image
+
+from dataset import data_dir
 from utils.general import *
 
 def write_to_tb(model_type, tb_writer, losses, val_res, epoch):
@@ -172,3 +175,111 @@ def plot_traj_pred_sample(coor_gt, coor_inpaint, inpaint_mask, save_dir=''):
             img = cv2.circle(img, (int(coor_inpaint[f][0] * WIDTH), int(coor_inpaint[f][1] * HEIGHT)), 2, (0, 255, 0), -1)
     
     cv2.imwrite(f'{save_dir}/cur_pred_InpaintNet.png', img)
+
+def plot_diff_hist(pred_dict_base, pred_dict_refine, split, save_dir):
+    """ Plot difference histogram. (difference is calculated in input space)
+
+        Args:
+            pred_dict_base (Dict): Baseline prediction dictionary
+            pred_dict_refine (Dict): Refined prediction dictionary
+            split (str): Split name
+            save_dir (str): Save directory
+
+        Returns:
+            None
+    
+    """
+    plt.rcParams.update({'font.size': 16})
+    
+    pred_types = ['TP', 'TN', 'FP1', 'FP2', 'FN']
+    pred_types_map = {i: pred_type for i, pred_type in enumerate(pred_types)}
+
+    drop_frame_dict = json.load(open(os.path.join(data_dir, 'drop_frame.json')))
+    start_frame, end_frame = drop_frame_dict['start'], drop_frame_dict['end']
+
+    for err_type in ['FP1', 'FP2']:
+        print(err_type)
+        refine_diff, baseline_diff = [], []
+        for rally_key_base, pred_base, rally_key_refine, pred_refine in zip(pred_dict_base.items(), pred_dict_refine.items()):
+            assert rally_key_base == rally_key_refine, 'rally key not match'
+            rally_key = rally_key_base
+            match_id, rally_id = rally_key.split('_')[0], '_'.join(rally_key.split('_')[1:])
+            start_f, end_f = start_frame[rally_key], end_frame[rally_key]
+            w, h = Image.open(os.path.join(data_dir, split, f'match{match_id}', 'frame', rally_id, '0.png')).size
+            w_scaler, h_scaler = WIDTH/w, HEIGHT/h
+
+            # Load ground truth
+            csv_file = os.path.join(data_dir, split, f'match{match_id}', 'corrected_csv' if split == 'test' else 'csv', f'{rally_id}_ball.csv')
+            label_df = pd.read_csv(csv_file, encoding='utf8')
+            x, y, vis = np.array(label_df['X'])[start_f:end_f], np.array(label_df['Y'])[start_f:end_f],np.array(label_df['Visibility'])[start_f:end_f]
+
+            # Load predicted trajectory
+            x_pred, y_pred, vis_pred = np.array(pred_base['X'])[start_f:end_f], np.array(pred_base['Y'])[start_f:end_f], np.array(pred_base['Visibility'])[start_f:end_f]
+            err_type_pred = np.array(pred_base[err_type])[start_f:end_f]
+
+            # Load refined trajectory
+            x_refine, y_refine, vis_refine = np.array(pred_refine['X'])[start_f:end_f], np.array(pred_refine['Y'])[start_f:end_f], np.array(pred_refine['Visibility'])[start_f:end_f]
+            err_type_refine = np.array(pred_refine[err_type])[start_f:end_f]
+
+            print('baseline')
+            for frame_i in range(len(x_pred)):
+                if pred_types_map[err_type_pred] == 'FP1':
+                    cx_true, cy_true = int(x[frame_i]/w_scaler), int(y[frame_i]/h_scaler)
+                    cx_pred, cy_pred = int(x_pred[frame_i]/w_scaler), int(y_pred[frame_i]/h_scaler)
+                    diff = math.sqrt(pow(cx_pred-cx_true, 2)+pow(cy_pred-cy_true, 2))
+                else:
+                    prev_offset, next_offset = 1, 1
+                    # Search for nearest visible frame
+                    while vis[frame_i-prev_offset] != 1:
+                        prev_offset += 1
+                    while vis[frame_i+next_offset] != 1:
+                        next_offset += 1
+                    cx_pred, cy_pred = int(x_pred[frame_i]/w_scaler), int(y_pred[frame_i]/h_scaler)
+                    cx_true, cy_true = int(x[frame_i-prev_offset]/w_scaler), int(y[frame_i-prev_offset]/h_scaler)
+                    diff_1 = math.sqrt(pow(cx_pred-cx_true, 2)+pow(cy_pred-cy_true, 2)) # diff with previous frame
+                    cx_true, cy_true = int(x[frame_i+next_offset]/w_scaler), int(y[frame_i+next_offset]/h_scaler)
+                    diff_2 = math.sqrt(pow(cx_pred-cx_true, 2)+pow(cy_pred-cy_true, 2)) # diff with next frame
+                    diff = min(diff_1, diff_2)
+                baseline_diff.append(diff)
+
+            print('refine')
+            for frame_i in range(len(x_pred)):
+                if err_type == 'FP1':
+                    cx_true, cy_true = int(x[frame_i]/w_scaler), int(y[frame_i]/h_scaler)
+                    cx_pred, cy_pred = int(x_refine[frame_i]/w_scaler), int(y_refine[frame_i]/h_scaler)
+                    diff = math.sqrt(pow(cx_pred-cx_true, 2)+pow(cy_pred-cy_true, 2))
+                else:
+                    prev_offset, next_offset = 1, 1
+                    # Search for nearest visible frame
+                    while vis[frame_i-prev_offset] != 1:
+                        prev_offset += 1
+                    while vis[frame_i+next_offset] != 1:
+                        next_offset += 1
+                    cx_pred, cy_pred = int(x_refine[frame_i]/w_scaler), int(y_refine[frame_i]/h_scaler)
+                    cx_true, cy_true = int(x[frame_i-prev_offset]/w_scaler), int(y[frame_i-prev_offset]/h_scaler)
+                    diff_1 = math.sqrt(pow(cx_pred-cx_true, 2)+pow(cy_pred-cy_true, 2))
+                    cx_true, cy_true = int(x[frame_i+next_offset]/w_scaler), int(y[frame_i+next_offset]/h_scaler)
+                    diff_2 = math.sqrt(pow(cx_pred-cx_true, 2)+pow(cy_pred-cy_true, 2))
+                    diff = min(diff_1, diff_2)
+                refine_diff.append(diff)
+
+        refine_diff, baseline_diff = np.array(refine_diff), np.array(baseline_diff)
+        max_diff = max(math.ceil(np.max(refine_diff)), math.ceil(np.max(baseline_diff)))
+        bins_bound = [b for b in range(0, max_diff, 4)]
+
+        plt.figure(figsize=(12, 4))
+        plt.title(f'{err_type} Sample\nCoordinate Difference Histogram')
+        counts, _, _ = plt.hist(refine_diff, bins=bins_bound, label='refine')
+        _, _, _ = plt.hist(baseline_diff, bins=bins_bound, label='baseline')
+        if max(counts) > 10:
+            plt.yticks(np.arange(0, max(counts), 10)) 
+        plt.grid(b=True, axis='y')
+        if err_type == 'FP1':
+            plt.xlabel('Difference between predicted and ground truth coordinate (pixel)')
+        else:
+            plt.xlabel('Difference between predicted and nearest ground truth coordinate (pixel)')
+        plt.ylabel('Sample Count')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, f'{err_type}_diff.png'))
+        plt.clf()

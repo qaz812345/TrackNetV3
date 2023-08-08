@@ -209,24 +209,24 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         file_format_str = os.path.join('{}', 'frame', '{}')
         match_dir, rally_id = parse.parse(file_format_str, rally_dir)
         
-        # Read label csv file
-        if 'test' in rally_dir:
-            csv_file = os.path.join(match_dir, 'corrected_csv', f'{rally_id}_ball.csv')
-        else:
-            csv_file = os.path.join(match_dir, 'csv', f'{rally_id}_ball.csv')
-        
-        assert os.path.exists(csv_file), f'{csv_file} does not exist.'
-        label_df = pd.read_csv(csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
-        
         if self.data_mode == 'heatmap':
+            # Read label csv file
+            if 'test' in rally_dir:
+                csv_file = os.path.join(match_dir, 'corrected_csv', f'{rally_id}_ball.csv')
+            else:
+                csv_file = os.path.join(match_dir, 'csv', f'{rally_id}_ball.csv')
+            
+            assert os.path.exists(csv_file), f'{csv_file} does not exist.'
+            label_df = pd.read_csv(csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
+
+            f_file = np.array([os.path.join(rally_dir, f'{f_id}.png') for f_id in label_df['Frame']])
+            x, y, v = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
+
             id = np.array([], dtype=np.int32).reshape(0, self.seq_len, 2)
             frame_file = np.array([]).reshape(0, self.seq_len)
             coor = np.array([], dtype=np.float32).reshape(0, self.seq_len, 2)
             vis = np.array([], dtype=np.float32).reshape(0, self.seq_len)
             
-            f_file = np.array([os.path.join(rally_dir, f'{f_id}.png') for f_id in label_df['Frame']])
-            x, y, v = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
-
             # Sliding on the frame sequence
             last_idx = -1
             for i in range(0, len(f_file), self.sliding_step):
@@ -260,23 +260,22 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             
             return dict(id=id, frame_file=frame_file, coor=coor, vis=vis)
         else:
+            # Read predicted csv file
+            pred_csv_file = os.path.join(match_dir, 'predicted_csv', f'{rally_id}_ball.csv')
+            assert os.path.exists(pred_csv_file), f'{pred_csv_file} does not exist.'
+            pred_df = pd.read_csv(pred_csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
+
+            f_file = np.array([os.path.join(rally_dir, f'{f_id}.png') for f_id in pred_df['Frame']])
+            x, y, v = np.array(pred_df['X_GT']), np.array(pred_df['Y_GT']), np.array(pred_df['Visibility_GT'])
+            x_pred, y_pred, v_pred = np.array(pred_df['X']), np.array(pred_df['Y']), np.array(pred_df['Visibility'])
+            inpaint = np.array(pred_df['Inpaint_Mask'])
+
             id = np.array([], dtype=np.int32).reshape(0, self.seq_len, 2)
             coor = np.array([], dtype=np.float32).reshape(0, self.seq_len, 2)
             coor_pred = np.array([], dtype=np.float32).reshape(0, self.seq_len, 2)
             vis = np.array([], dtype=np.float32).reshape(0, self.seq_len)
             pred_vis = np.array([], dtype=np.float32).reshape(0, self.seq_len)
             inpaint_mask = np.array([], dtype=np.float32).reshape(0, self.seq_len)
-
-            # Read predicted csv file
-            pred_csv_file = os.path.join(match_dir, 'predicted_csv', f'{rally_id}_ball.csv')
-            assert os.path.exists(pred_csv_file), f'{pred_csv_file} does not exist.'
-            pred_df = pd.read_csv(pred_csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
-            assert len(label_df) == len(pred_df), f'Length of label and predicted csv files are not equal.'
-
-            f_file = np.array([os.path.join(rally_dir, f'{f_id}.png') for f_id in label_df['Frame']])
-            x, y, v = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
-            x_pred, y_pred, v_pred = np.array(pred_df['X']), np.array(pred_df['Y']), np.array(pred_df['Visibility'])
-            inpaint = np.array(pred_df['Inpaint_Mask'])
 
             # Sliding on the frame sequence
             last_idx = -1
@@ -646,8 +645,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             w, h = self.img_config['img_shape'][data_idx[0][0]]
             
             # Normalization
-            coor[:, 0] = coor[:, 0] / w
-            coor[:, 1] = coor[:, 1] / h
+            coor[:, 0] = coor[:, 0] / self.WIDTH
+            coor[:, 1] = coor[:, 1] / self.HEIGHT
             coor_pred[:, 0] = coor_pred[:, 0] / self.WIDTH
             coor_pred[:, 1] = coor_pred[:, 1] / self.HEIGHT
 

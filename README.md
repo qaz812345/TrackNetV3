@@ -29,7 +29,7 @@
     ```
 
 ## Training
-### Prepare Dataset
+### 1. Prepare Dataset
 * Shuttlecock Trajectory Dataset description: https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw 
 * Set the data root directory in ```dataset.py```.
 * Data Preprocessing
@@ -37,7 +37,10 @@
     python preprocess.py
     ```
 * The `frame` directories and the `val` directory will be generated after preprocessing.
-* Remove `train/match16/median.npz` due to inconsistent camera viewpoints.
+* Check the estimated background images in `<data_dir>/median`
+    * If available, the dataset will use the median image of the match; otherwise, it will use the median image of the rally.
+    * For example, you can exclude `train/match16/median.npz` due to camera angle discrepancies; therefore, the dataset will resort to the median image of the rally within match 16.
+* The preprocessed dataset will be cached using npy files, so please ensure that you delete these files if you make any modifications to the dataset.
 * Dataset File Structure:
 ```
 Shuttlecock_Trajectory_Dataset
@@ -80,9 +83,8 @@ Shuttlecock_Trajectory_Dataset
         ├── match2/
         └── match3/
 ```
-
-### Train TrackNet
-* Train from scratch 
+### 2. Train Tracking Module
+* Train the tracking module from scratch
     ```
     python train.py --model_name TrackNet --seq_len 8 --epochs 30 --batch_size 10 --bg_mode concat --alpha 0.5 --save_dir exp --verbose
     ```
@@ -92,14 +94,15 @@ Shuttlecock_Trajectory_Dataset
     python train.py --model_name TrackNet --epochs 30 --save_dir exp --resume_training --verbose
     ```
 
-### Generate Inpainting Mask
-* Generate predicted trajectories and inpainting mask
+### 3. Generate Predited Trajectories and Inpainting Masks
+* Generate predicted trajectories and inpainting masks for training rectification module
+    * Noted that the coordinate range corresponds to the input spatial dimensions, not the size of the original image.
     ```
     python generate_mask_data.py --tracknet_file TrackNet_best.pt --batch_size 16
     ```
 
-### Train InpaintNet
-* Train from scratch 
+### 4. Train Rectification Module
+* Train the rectification module from scratch.
     ```
     python train.py --model_name InpaintNet --seq_len 16 --epoch 300 --batch_size 32 --lr_scheduler StepLR --mask_ratio 0.3 --save_dir exp --verbose
     ```
@@ -112,10 +115,11 @@ Shuttlecock_Trajectory_Dataset
 ## Evaluation
 * Evaluate TrackNetV3 on test set
     ```
-    python test.py --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir eval
+    python generate_mask_data.py --tracknet_file TrackNet_best.pt --split_list test
+    python test.py --inpaintnet_file InpaintNet_best.pt --save_dir eval
     ```
 
-* Evaluate the TrackNet module on test set
+* Evaluate the tracking module on test set
     ```
     python test.py --tracknet_file TrackNet_best.pt --save_dir eval
     ```

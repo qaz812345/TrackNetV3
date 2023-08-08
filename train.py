@@ -144,20 +144,20 @@ def train_inpaintnet(model, optimizer, data_loader, param_dict):
     else:
         data_prob = data_loader
 
-    for step, (_, pred_coor, gt_coor, _, vis, _) in enumerate(data_prob):
+    for step, (_, coor_pred, coor_gt, _, vis_gt, _) in enumerate(data_prob):
         optimizer.zero_grad()
-        pred_coor, gt_coor, vis = pred_coor.float().cuda(), gt_coor.float().cuda(), vis.float().cuda()
+        coor_pred, coor_gt, vis_gt = coor_pred.float().cuda(), coor_gt.float().cuda(), vis_gt.float().cuda()
 
         # Sample random mask as inpainting mask
-        mask = get_random_mask(mask_size=gt_coor.shape[:2], mask_ratio=param_dict['mask_ratio']).cuda() # (N, L, 1)
-        inpaint_mask = torch.logical_and(vis, mask).int() # visible and masked area
+        mask = get_random_mask(mask_size=coor_gt.shape[:2], mask_ratio=param_dict['mask_ratio']).cuda() # (N, L, 1)
+        inpaint_mask = torch.logical_and(vis_gt, mask).int() # visible and masked area
         
-        pred_coor = pred_coor * (1 - mask) # masked area is set to 0
-        refine_coor = model(pred_coor, inpaint_mask)
+        coor_pred = coor_pred * (1 - inpaint_mask) # masked area is set to 0
+        refine_coor = model(coor_pred, inpaint_mask)
 
         # Calculate masked loss
         masked_refine_coor = refine_coor * inpaint_mask
-        masked_gt_coor = gt_coor * inpaint_mask
+        masked_gt_coor = coor_gt * inpaint_mask
         loss = nn.MSELoss()(masked_refine_coor, masked_gt_coor)
         epoch_loss.append(loss.item())
 
@@ -171,8 +171,8 @@ def train_inpaintnet(model, optimizer, data_loader, param_dict):
 
         # Visualize current prediction
         if (step + 1) % display_step == 0:
-            gt_coor, refine_coor, inpaint_mask = gt_coor.detach().cpu().numpy(), refine_coor.detach().cpu().numpy(), inpaint_mask.detach().cpu().numpy()
-            plot_traj_pred_sample(gt_coor[0], refine_coor[0], inpaint_mask[0], save_dir=param_dict['save_dir'])
+            coor_gt, refine_coor, inpaint_mask = coor_gt.detach().cpu().numpy(), refine_coor.detach().cpu().numpy(), inpaint_mask.detach().cpu().numpy()
+            plot_traj_pred_sample(coor_gt[0], refine_coor[0], inpaint_mask[0], save_dir=param_dict['save_dir'])
     
     return float(np.mean(epoch_loss))
 

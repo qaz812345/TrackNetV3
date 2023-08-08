@@ -19,11 +19,13 @@ from utils.general import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--split', type=str, default='test')
+parser.add_argument('--mode', type=str, default='point')
 parser.add_argument('--host', type=str, default='127.0.0.1')
 parser.add_argument('--debug', action='store_true', default=False)
 args = parser.parse_args()
 
 split = args.split
+mode = args.mode
 host = args.host
 debug = args.debug
 
@@ -191,7 +193,9 @@ def change_dropdown(eval_file_1, eval_file_2, rally_key):
 def show_frame(hoverData):
     global match_id, rally_id, x_gt, y_gt, x_pred_1, y_pred_1, x_pred_2, y_pred_2
     traj_len = 16
-    radius, bbox_width, marker_size = 5, 1, 10
+    radius, bbox_width, marker_size = 5, 1, 5
+    point_visible = True if mode == 'point' else 'legendonly'
+    traj_visible = True if mode == 'traj' else 'legendonly'
     
     #print(f'hover_data: {hoverData}')
     frame_id = hoverData['points'][0]['x']
@@ -230,45 +234,44 @@ def show_frame(hoverData):
     )'''
     
     frame_fig.add_trace(
-        go.Scatter(x=x_pred_1[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
-                    y=y_pred_1[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
-                    marker_color=[f'rgba(0, {170+int(80/traj_len)*i}, 0, {0.3+int(0.6/traj_len)*i})' for i in range(traj_len)],
+        go.Scatter(x=x_pred_1[frame_id-traj_len+1:frame_id+1],
+                    y=y_pred_1[frame_id-traj_len+1:frame_id+1],
+                    marker_color=[f'rgba({170+int(80/traj_len)*i}, {170+int(80/traj_len)*i}, 0, 1)' for i in range(traj_len)],
                     text=[f for f in range(frame_id-int(traj_len/2), frame_id+int(traj_len/2)+1)],
-                    mode='markers', marker_size=marker_size, name='pred_1_traj', visible=True)
+                    mode='markers', marker_size=marker_size, name='pred 1_traj', visible=traj_visible)
     )
     frame_fig.add_trace(
-        go.Scatter(x=x_pred_2[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
-                    y=y_pred_2[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
-                    marker_color=[f'rgba(0, 0, {170+int(80/traj_len)*i}, {0.3+int(0.6/traj_len)*i})' for i in range(traj_len)],
+        go.Scatter(x=x_pred_2[frame_id-traj_len+1:frame_id+1],
+                    y=y_pred_2[frame_id-traj_len+1:frame_id+1],
+                    marker_color=[f'rgba(0, {170+int(80/traj_len)*i}, 0, 1)' for i in range(traj_len)],
                     text=[f for f in range(frame_id-int(traj_len/2), frame_id+int(traj_len/2)+1)],
-                    mode='markers', marker_size=marker_size, name='pred_2_traj', visible=True)
+                    mode='markers', marker_size=marker_size, name='pred 2_traj', visible=traj_visible)
     )
     frame_fig.add_trace(
-        go.Scatter(x=x_gt[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
-                    y=y_gt[frame_id-int(traj_len/2):frame_id+int(traj_len/2)+1],
-                    marker_color=[f'rgba({170+int(80/traj_len)*i}, 0, 0, {0.3+int(0.6/traj_len)*i})' for i in range(traj_len)],
+        go.Scatter(x=x_gt[frame_id-traj_len+1:frame_id+1],
+                    y=y_gt[frame_id-traj_len+1:frame_id+1],
+                    marker_color=[f'rgba({170+int(80/traj_len)*i}, 0, 0, 1)' for i in range(traj_len)],
                     text=[f for f in range(frame_id-int(traj_len/2), frame_id+int(traj_len/2)+1)],
-                    mode='markers', marker_size=marker_size, name='gt_traj', visible='legendonly')
+                    mode='markers', marker_size=marker_size, name='gt traj', visible=traj_visible)
     )
     frame_fig.add_trace(
         go.Scatter(x=x_pred_1[frame_id:frame_id+1], y=y_pred_1[frame_id:frame_id+1],
-                    marker_color=['rgba(0, 255, 0, 0.5)'], text=[frame_id],
-                    mode='markers', marker_size=marker_size, name='pred_1', visible='legendonly')
+                    marker_color=['rgba(0, 0, 255, 1)'], text=[frame_id],
+                    mode='markers', marker_size=marker_size, name='pred 1', visible=point_visible)
     )
     frame_fig.add_trace(
         go.Scatter(x=x_pred_2[frame_id:frame_id+1], y=y_pred_2[frame_id:frame_id+1],
-                    marker_color=['rgba(0, 0, 255, 0.5)'], text=[frame_id],
-                    mode='markers', marker_size=marker_size, name='pred_2', visible='legendonly')
+                    marker_color=['rgba(0, 255, 0, 1)'], text=[frame_id],
+                    mode='markers', marker_size=marker_size, name='pred 2', visible=point_visible)
     )
     frame_fig.add_trace(
         go.Scatter(x=x_gt[frame_id:frame_id+1], y=y_gt[frame_id:frame_id+1],
-                    marker_color=['rgba(255, 0, 0, 0.5)'], text=[frame_id],
-                    mode='markers', marker_size=marker_size, name='gt')
+                    marker_color=['rgba(255, 0, 0, 1)'], text=[frame_id],
+                    mode='markers', marker_size=marker_size, name='gt', visible=point_visible)
     )
     frame_fig.update_layout(dragmode='pan', clickmode='event+select', autosize=False,
                             margin={'l':0, 'r':0, 't':50, 'b':0}, width=img_w, height=img_h,
-                            title_text=f'f_{frame_id} label: ({cx}, {cy}), pred 1: ({cx_pred_1}, {cy_pred_1}), pred 2: ({cx_pred_2}, {cy_pred_2})', title_x=0.5)
-    frame_fig.update_layout(legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=0.5))
+                            title_text=f'Frame {frame_id} label: ({cx}, {cy}), pred 1: ({cx_pred_1}, {cy_pred_1}), pred 2: ({cx_pred_2}, {cy_pred_2})', title_x=0.45)
 
     return frame_fig
 
