@@ -925,6 +925,7 @@ if __name__ == '__main__':
     param_dict = vars(args)
     param_dict['num_workers'] = args.batch_size if args.batch_size <= 16 else 16
     param_dict['output_bbox'] = args.output_bbox
+    param_dict['output_gt'] = False
     
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
