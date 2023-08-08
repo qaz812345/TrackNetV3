@@ -218,6 +218,7 @@ if __name__ == '__main__':
         print(f'Load checkpoint from {args.model_name}_cur.pt...')
         assert os.path.exists(os.path.join(args.save_dir, f'{args.model_name}_cur.pt')), f'No checkpoint found in {args.save_dir}'
         ckpt = torch.load(os.path.join(args.save_dir, f'{args.model_name}_cur.pt'))
+        param_dict = ckpt['param_dict']
         ckpt['param_dict']['resume_training'] = args.resume_training
         ckpt['param_dict']['epochs'] = args.epochs
         ckpt['param_dict']['verbose'] = args.verbose

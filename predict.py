@@ -52,7 +52,8 @@ def predict(indices, y_pred=None, c_pred=None, img_scaler=(1, 1)):
                 elif y_pred is not None:
                     # Predict from heatmap
                     y_p = y_pred[n][f]
-                    cx_pred, cy_pred = predict_location(to_img(y_p))
+                    bbox_pred = predict_location(to_img(y_p))
+                    cx_pred, cy_pred = int(bbox_pred[0]+bbox_pred[2]/2), int(bbox_pred[1]+bbox_pred[3]/2)
                     cx_pred, cy_pred = int(cx_pred*img_scaler[0]), int(cy_pred*img_scaler[1])
                 else:
                     raise ValueError('Invalid input')

@@ -939,9 +939,10 @@ if __name__ == '__main__':
         tracknet = get_model('TrackNet', seq_len=param_dict['tracknet_seq_len'], bg_mode=param_dict['bg_mode']).cuda()
         tracknet.load_state_dict(tracknet_ckpt['model'])
         model = (tracknet, None)
+    else:
+        tracknet = None
     
     if args.inpaintnet_file:
-        assert args.tracknet_file
         inpaintnet_ckpt = torch.load(args.inpaintnet_file)
         param_dict['inpaintnet_seq_len'] = inpaintnet_ckpt['param_dict']['seq_len']
         inpaintnet = get_model('InpaintNet').cuda()

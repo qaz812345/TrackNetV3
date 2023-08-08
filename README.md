@@ -18,6 +18,11 @@
     ```
 
 ## Inference
+* Download the [checkpoints](https://drive.google.com/file/d/1CfzE87a0f6LhBp0kniSl1-89zaLCZ8cA/view?usp=drive_link)
+* Unzip the file
+    ```
+    unzip TrackNetV3_ckpts.zip
+    ```
 * Predict the label csv from the video
     ```
     python predict.py --video_file test.mp4 --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir prediction

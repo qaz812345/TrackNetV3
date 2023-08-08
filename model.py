@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class Conv2DBlock(nn.Module):
-    """ Conv2D + BN + ReLU"""
+    """ Conv2D + BN + ReLU """
     def __init__(self, in_dim, out_dim, **kwargs):
         super(Conv2DBlock, self).__init__(**kwargs)
         self.conv = nn.Conv2d(in_dim, out_dim, kernel_size=3, padding='same', bias=False)
@@ -16,7 +16,7 @@ class Conv2DBlock(nn.Module):
         return x
 
 class Double2DConv(nn.Module):
-    """ Conv2DBlock x 2"""
+    """ Conv2DBlock x 2 """
     def __init__(self, in_dim, out_dim):
         super(Double2DConv, self).__init__()
         self.conv_1 = Conv2DBlock(in_dim, out_dim)
@@ -28,7 +28,7 @@ class Double2DConv(nn.Module):
         return x
     
 class Triple2DConv(nn.Module):
-    """ Conv2DBlock x 3"""
+    """ Conv2DBlock x 3 """
     def __init__(self, in_dim, out_dim):
         super(Triple2DConv, self).__init__()
         self.conv_1 = Conv2DBlock(in_dim, out_dim)
