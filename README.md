@@ -20,12 +20,12 @@
 ## Inference
 * Predict the label csv from the video
     ```
-    python predict.py --video_file test.mp4 --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir prediction
+    python predict.py --video_file test.mp4 --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir prediction
     ```
 
 * Predict the label csv from the video, and output a video with predicted trajectory
     ```
-    python predict.py --video_file test.mp4 --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir prediction --output_video
+    python predict.py --video_file test.mp4 --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir prediction --output_video
     ```
 
 ## Training
@@ -98,7 +98,7 @@ Shuttlecock_Trajectory_Dataset
 * Generate predicted trajectories and inpainting masks for training rectification module
     * Noted that the coordinate range corresponds to the input spatial dimensions, not the size of the original image.
     ```
-    python generate_mask_data.py --tracknet_file TrackNet_best.pt --batch_size 16
+    python generate_mask_data.py --tracknet_file ckpts/TrackNet_best.pt --batch_size 16
     ```
 
 ### 4. Train Rectification Module
@@ -115,24 +115,24 @@ Shuttlecock_Trajectory_Dataset
 ## Evaluation
 * Evaluate TrackNetV3 on test set
     ```
-    python generate_mask_data.py --tracknet_file TrackNet_best.pt --split_list test
-    python test.py --inpaintnet_file InpaintNet_best.pt --save_dir eval
+    python generate_mask_data.py --tracknet_file ckpts/TrackNet_best.pt --split_list test
+    python test.py --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir eval
     ```
 
 * Evaluate the tracking module on test set
     ```
-    python test.py --tracknet_file TrackNet_best.pt --save_dir eval
+    python test.py --tracknet_file ckpts/TrackNet_best.pt --save_dir eval
     ```
 
 * Generate video with ground truth label and predicted result
     ```
-    python test.py --tracknet_file TrackNet_best.pt --video_file data/test/match1/video/1_05_02.mp4 
+    python test.py --tracknet_file ckpts/TrackNet_best.pt --video_file data/test/match1/video/1_05_02.mp4 
     ```
 
 ## Error Analysis Interface
 * Evaluate TrackNetV3 on test set and save the detail results for error analysis
     ```
-    python test.py --tracknet_file TrackNet_best.pt --inpaintnet_file InpaintNet_best.pt --save_dir eval --output_pred
+    python test.py --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir eval --output_pred
     ```
 
 * Add json path of evaluation results to the file list in `error_analysis.py`
