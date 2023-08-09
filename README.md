@@ -18,7 +18,7 @@
     ```
 
 ## Inference
-* Download the [checkpoints](https://drive.google.com/file/d/1CfzE87a0f6LhBp0kniSl1-89zaLCZ8cA/view?usp=drive_link)
+* Download the [checkpoints]()
 * Unzip the file
     ```
     unzip TrackNetV3_ckpts.zip
