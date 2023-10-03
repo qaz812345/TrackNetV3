@@ -36,7 +36,7 @@
 ## Training
 ### 1. Prepare Dataset
 * Shuttlecock Trajectory Dataset description: https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw 
-* Set the data root directory in ```dataset.py```.
+* Set the data root directory to ```data_dir``` in ```dataset.py```.
 * Data Preprocessing
     ```
     python preprocess.py
@@ -48,7 +48,7 @@
 * The preprocessed dataset will be cached using npy files, so please ensure that you delete these files if you make any modifications to the dataset.
 * Dataset File Structure:
 ```
-Shuttlecock_Trajectory_Dataset
+  data
     ├─ train
     |   ├── match1/
     |   │   ├── csv/

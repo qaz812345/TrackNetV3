@@ -5,3 +5,4 @@ pandas==2.0.0
 Pillow==10.0.0
 plotly==5.8.2
 torch==1.10.0
+parse
