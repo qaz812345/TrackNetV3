@@ -24,17 +24,19 @@ for split in ['train', 'test']:
     match_dirs = list_dirs(os.path.join(data_dir, split))
     for match_dir in match_dirs:
         match_frame_count = 0
-        match_name = match_dir.split('/')[-1]
+        file_format_str = os.path.join('{}', 'match{}')
+        _, match_id = parse.parse(file_format_str, match_dir)
         video_files = list_dirs(os.path.join(match_dir, 'video'))
         for video_file in video_files:
             generate_data_frames(video_file)
-            video_name = video_file.split('/')[-1]
-            rally_dir = os.path.join(match_dir, 'frame', video_name.split('.')[0])
+            file_format_str = os.path.join('{}', 'video', '{}.mp4')
+            _, video_name = parse.parse(file_format_str, video_file)
+            rally_dir = os.path.join(match_dir, 'frame', video_name)
             video_frame_count = get_num_frames(rally_dir)
-            print(f'[{split} / {match_name} / {video_name}]\tvideo frames: {video_frame_count}')
+            print(f'[{split} / match{match_id} / {video_name}]\tvideo frames: {video_frame_count}')
             match_frame_count += video_frame_count
         get_match_median(match_dir)
-        print(f'[{split} / {match_name}]:\ttotal frames: {match_frame_count}')
+        print(f'[{split} / match{match_id}]:\ttotal frames: {match_frame_count}')
         split_frame_count += match_frame_count
     
     print(f'[{split}]:\ttotal frames: {split_frame_count}')
