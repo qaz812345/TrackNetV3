@@ -1,4 +1,49 @@
 # TrackNetV3
+We present TrackNetV3, a sophisticated model designed to enhance
+the precision of shuttlecock localization in broadcast badminton
+videos. TrackNetV3 is composed of two core modules: trajectory
+prediction and rectification. The trajectory prediction module leverages an estimated background as auxiliary data to locate the shuttlecock in spite of the fluctuating visual interferences. This module
+also incorporates mixup data augmentation to formulate complex
+scenarios to strengthen the network’s robustness. Given that a shuttlecock can occasionally be obstructed, we create repair masks by
+analyzing the predicted trajectory, subsequently rectifying the path
+via inpainting. This process significantly enhances the accuracy of
+tracking and the completeness of the trajectory. Our experimental
+results illustrate a substantial enhancement over previous standard
+methods, increasing the accuracy from 87.72% to 97.51%. These results validate the effectiveness of TrackNetV3 in progressing shuttlecock tracking within the context of badminton matches.
+<div align="center">
+    <a href="./">
+        <img src="./figure/NetArch.png" width="50%"/>
+    </a>
+</div>
+
+## Performance 
+
+* Performance on the test split of [Shuttlecock Trajectory Dataset](https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw).
+
+<div align="center">
+    <table>
+    <thead>
+        <tr>
+        <th>Model</th> <th>Accuracy</th> <th>Precision</th> <th>Recall</th> <th>F1</th> <th>FPS</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+        <td>YOLOv7</td> <td>57.82%</td> <td>78.53%</td> <td>59.96%</td> <td>68.00%</td> <td><b>34.77</b></td>
+        </tr>
+        <tr>
+        <td>TrackNetV2</td> <td>94.98%</td> <td><b>99.64%</b></td> <td>94.56%</td> <td>97.03%</td> <td>27.70</td>
+        </tr>
+        <tr>
+        <td>TrackNetV3</td> <td><b>97.51%</b></td> <td>97.79%</td> <td><b>99.33%</b></td> <td><b>98.56%</b></td> <td>25.11</td>
+        </tr>
+    </tbody>
+    </table>
+    </br>
+    <a href="./">
+        <img src="./figure/Comparison.png" width="80%"/>
+    </a>
+</div>
 
 ## Installation
 * Develop Environment
@@ -19,7 +64,7 @@
 
 ## Inference
 * Download the [checkpoints](https://drive.google.com/file/d/1CfzE87a0f6LhBp0kniSl1-89zaLCZ8cA/view?usp=sharing)
-* Unzip the file
+* Unzip the file and place the parameter files to ```ckpts```
     ```
     unzip TrackNetV3_ckpts.zip
     ```
@@ -35,7 +80,7 @@
 
 ## Training
 ### 1. Prepare Dataset
-* Shuttlecock Trajectory Dataset description: https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw 
+* Download [Shuttlecock Trajectory Dataset](https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw)
 * Set the data root directory to ```data_dir``` in ```dataset.py```.
 * Data Preprocessing
     ```
@@ -166,3 +211,8 @@
     ```
     python error_analysis.py --split test --host 127.0.0.1
     ```
+<div align="center">
+    <a href="./">
+        <img src="./figure/ErrorAnalysisUI.png" width="70%"/>
+    </a>
+</div>
