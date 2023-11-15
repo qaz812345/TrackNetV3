@@ -1,15 +1,7 @@
 # TrackNetV3
-We present TrackNetV3, a sophisticated model designed to enhance
-the precision of shuttlecock localization in broadcast badminton
-videos. TrackNetV3 is composed of two core modules: trajectory
-prediction and rectification. The trajectory prediction module leverages an estimated background as auxiliary data to locate the shuttlecock in spite of the fluctuating visual interferences. This module
-also incorporates mixup data augmentation to formulate complex
-scenarios to strengthen the network’s robustness. Given that a shuttlecock can occasionally be obstructed, we create repair masks by
-analyzing the predicted trajectory, subsequently rectifying the path
-via inpainting. This process significantly enhances the accuracy of
-tracking and the completeness of the trajectory. Our experimental
-results illustrate a substantial enhancement over previous standard
-methods, increasing the accuracy from 87.72% to 97.51%. These results validate the effectiveness of TrackNetV3 in progressing shuttlecock tracking within the context of badminton matches.
+We present TrackNetV3, a model composed of two core modules: trajectory prediction and rectification. The trajectory prediction module leverages an estimated background as auxiliary data to locate the shuttlecock in spite of the fluctuating visual interferences. This module also incorporates mixup data augmentation to formulate complex
+scenarios to strengthen the network’s robustness. Given that a shuttlecock can occasionally be obstructed, we create repair masks by analyzing the predicted trajectory, subsequently rectifying the path via inpainting.
+
 <div align="center">
     <a href="./">
         <img src="./figure/NetArch.png" width="50%"/>
