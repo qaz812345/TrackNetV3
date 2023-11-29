@@ -17,6 +17,7 @@ WIDTH = 512
 SIGMA = 2.5
 DELTA_T = 1/math.sqrt(HEIGHT**2 + WIDTH**2)
 COOR_TH = DELTA_T * 50
+IMG_FORMAT = 'png'
 
 
 class ResumeArgumentParser():
@@ -151,8 +152,7 @@ def get_num_frames(rally_dir):
         frame_files = list_dirs(rally_dir)
     except:
         raise ValueError(f'{rally_dir} does not exist.')
-    
-    frame_files = [f for f in frame_files if f[-4:] == '.png']
+    frame_files = [f for f in frame_files if f.split('.')[-1] == IMG_FORMAT]
     return len(frame_files)
 
 def get_rally_dirs(data_dir, split):
@@ -360,9 +360,9 @@ def convert_gt_to_coco_json(data_dir, split, drop=False):
             rally_key = f'{match_id}_{rally_id}'
             start_f, end_f = start_frame[rally_key], end_frame[rally_key]
             f, x, y, v = f[start_f:end_f] ,x[start_f:end_f], y[start_f:end_f], v[start_f:end_f]
-        w, h = Image.open(f'{match_dir}/frame/{rally_id}/0.png').size
+        w, h = Image.open(f'{match_dir}/frame/{rally_id}/0.{IMG_FORMAT}').size
         for i, cx, cy, vis in zip(f, x, y, v):
-            image_info.append({'id': sample_count, 'width': w, 'height': h, 'file_name': f'{match_dir}/frame/{rally_id}/{i}.png'})
+            image_info.append({'id': sample_count, 'width': w, 'height': h, 'file_name': f'{match_dir}/frame/{rally_id}/{i}.{IMG_FORMAT}'})
             if vis > 0:
                 annotations.append({'id': sample_count,
                                     'image_id': sample_count,
@@ -397,7 +397,7 @@ def generate_data_frames(video_file):
             None
         
         Actions:
-            Generate frames from the video and save as png files to the corresponding frame directory
+            Generate frames from the video and save as image files to the corresponding frame directory
     """
 
     # Check file format
@@ -436,7 +436,7 @@ def generate_data_frames(video_file):
         success, frame = cap.read()
         if success:
             frames.append(frame)
-            cv2.imwrite(os.path.join(rally_dir, f'{len(frames)-1}.png'), frame)#, [cv2.IMWRITE_PNG_COMPRESSION, 0])
+            cv2.imwrite(os.path.join(rally_dir, f'{len(frames)-1}.{IMG_FORMAT}'), frame)
     
     # Calculate the median of all frames
     median = np.median(np.array(frames), 0)

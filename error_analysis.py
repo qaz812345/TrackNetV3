@@ -14,7 +14,7 @@ from dash import dcc, html
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output
 
-from dataset import Shuttlecock_Trajectory_Dataset, data_dir
+from dataset import data_dir
 from utils.general import *
 
 parser = argparse.ArgumentParser()
@@ -204,7 +204,7 @@ def show_frame(hoverData):
     cx_pred_2, cy_pred_2 = x_pred_2[frame_id], y_pred_2[frame_id]
 
     # Read Read frame image
-    img_path = os.path.join(data_dir, split, f'match{match_id}', 'frame', rally_id, f'{frame_id}.png')
+    img_path = os.path.join(data_dir, split, f'match{match_id}', 'frame', rally_id, f'{frame_id}.{IMG_FORMAT}')
     img = cv2.imread(img_path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_h, img_w = img.shape[:2]

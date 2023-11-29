@@ -6,7 +6,7 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 from torch.utils.data import Dataset
-from utils.general import get_rally_dirs, get_match_median, HEIGHT, WIDTH, SIGMA
+from utils.general import get_rally_dirs, get_match_median, HEIGHT, WIDTH, SIGMA, IMG_FORMAT
 
 data_dir = 'data'
 
@@ -154,7 +154,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         img_shape = [] # (num_rally, 2)
 
         for rally_i, rally_dir in tqdm(self.rally_dict['i2p'].items()):
-            w, h = Image.open(os.path.join(rally_dir, '0.png')).size
+            w, h = Image.open(os.path.join(rally_dir, f'0.{IMG_FORMAT}')).size
             w_scaler, h_scaler = w / self.WIDTH, h / self.HEIGHT
             img_scaler.append((w_scaler, h_scaler))
             img_shape.append((w, h))
@@ -219,7 +219,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             assert os.path.exists(csv_file), f'{csv_file} does not exist.'
             label_df = pd.read_csv(csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
 
-            f_file = np.array([os.path.join(rally_dir, f'{f_id}.png') for f_id in label_df['Frame']])
+            f_file = np.array([os.path.join(rally_dir, f'{f_id}.{IMG_FORMAT}') for f_id in label_df['Frame']])
             x, y, v = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
 
             id = np.array([], dtype=np.int32).reshape(0, self.seq_len, 2)
@@ -265,7 +265,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             assert os.path.exists(pred_csv_file), f'{pred_csv_file} does not exist.'
             pred_df = pd.read_csv(pred_csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
 
-            f_file = np.array([os.path.join(rally_dir, f'{f_id}.png') for f_id in pred_df['Frame']])
+            f_file = np.array([os.path.join(rally_dir, f'{f_id}.{IMG_FORMAT}') for f_id in pred_df['Frame']])
             x, y, v = np.array(pred_df['X_GT']), np.array(pred_df['Y_GT']), np.array(pred_df['Visibility_GT'])
             x_pred, y_pred, v_pred = np.array(pred_df['X']), np.array(pred_df['Y']), np.array(pred_df['Visibility'])
             inpaint = np.array(pred_df['Inpaint_Mask'])
@@ -473,7 +473,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 w_scaler, h_scaler = self.img_config['img_scaler'][data_idx[0][0]]
 
                 if self.bg_mode:
-                    match_dir, rally_id, _ = parse.parse('{}/frame/{}/{}.png', frame_file[0])
+                    file_format_str = os.path.join('{}', 'frame', '{}','{}.'+IMG_FORMAT)
+                    match_dir, rally_id, _ = parse.parse(file_format_str, frame_file[0])#'{}/frame/{}/{}.png', frame_file[0])
                     median_file = os.path.join(match_dir, 'median.npz') if os.path.exists(os.path.join(match_dir, 'median.npz')) else os.path.join(match_dir, 'frame', rally_id, 'median.npz')
                     assert os.path.exists(median_file), f'{median_file} does not exist.'
                     median_img = np.load(median_file)['median']
@@ -592,7 +593,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
 
                 # Read median image
                 if self.bg_mode:
-                    match_dir, rally_id, _ = parse.parse('{}/frame/{}/{}.png', frame_file[0])
+                    file_format_str = os.path.join('{}', 'frame', '{}','{}.'+IMG_FORMAT)
+                    match_dir, rally_id, _ = parse.parse(file_format_str, frame_file[0])#'{}/frame/{}/{}.png', frame_file[0])
                     median_file = os.path.join(match_dir, 'median.npz') if os.path.exists(os.path.join(match_dir, 'median.npz')) else os.path.join(match_dir, 'frame', rally_id, 'median.npz')
                     assert os.path.exists(median_file), f'{median_file} does not exist.'
                     median_img = np.load(median_file)['median']

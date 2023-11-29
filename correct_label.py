@@ -220,7 +220,7 @@ def show_frame(hoverData, clickData, n_clicks):
     frame_id = hoverData['points'][0]['x']
 
     # Read frame image
-    img_path = os.path.join(data_dir, split, f'match{match_id}', 'frame', f'{rally_id}', f'{frame_id}.png')
+    img_path = os.path.join(data_dir, split, f'match{match_id}', 'frame', f'{rally_id}', f'{frame_id}.{IMG_FORMAT}')
     assert os.path.exists(img_path), f'Image not found: {img_path}'
     img = cv2.imread(img_path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)

@@ -90,7 +90,7 @@ def plot_median_files(data_dir):
             _, match_id = parse.parse(file_format_str, match_dir)
             if os.path.exists(os.path.join(data_dir, split, f'match{match_id}', 'median.npz')):
                 median = np.load(os.path.join(data_dir, split, f'match{match_id}', 'median.npz'))['median'][..., ::-1] # BGR to RGB
-                cv2.imwrite(os.path.join(data_dir, 'median', f'{split}_m{match_id}.png'), median)
+                cv2.imwrite(os.path.join(data_dir, 'median', f'{split}_m{match_id}.{IMG_FORMAT}'), median)
             rally_dirs = list_dirs(os.path.join(match_dir, 'frame'))
             # For each rally
             for rally_dir in rally_dirs:
@@ -98,7 +98,7 @@ def plot_median_files(data_dir):
                 _, rally_id = parse.parse(file_format_str, rally_dir)
                 if os.path.exists(os.path.join(rally_dir, 'median.npz')):
                     median = np.load(os.path.join(rally_dir, 'median.npz'))['median'][..., ::-1] # BGR to RGB
-                    cv2.imwrite(os.path.join(data_dir, 'median', f'{split}_m{match_id}_r{rally_id}.png'), median)
+                    cv2.imwrite(os.path.join(data_dir, 'median', f'{split}_m{match_id}_r{rally_id}.{IMG_FORMAT}'), median)
 
 def plot_heatmap_pred_sample(x, y, y_pred, c, bg_mode, save_dir):
     """ Visualize input and output of TrackNet and save as a gif. Including 4 subplots:
@@ -153,7 +153,7 @@ def plot_heatmap_pred_sample(x, y, y_pred, c, bg_mode, save_dir):
         imgs[0].save(f'{save_dir}/cur_pred_TrackNet.gif', format='GIF', save_all=True, append_images=imgs[1:], duration=1000, loop=0)
 
 def plot_traj_pred_sample(coor_gt, coor_inpaint, inpaint_mask, save_dir=''):
-    """ Visualize input and output of InpaintNet and save as a png.
+    """ Visualize input and output of InpaintNet and save as a image.
 
         Args:
             coor_gt (numpy.ndarray): Ground-truth trajectory with shape (L, 2)
@@ -174,7 +174,7 @@ def plot_traj_pred_sample(coor_gt, coor_inpaint, inpaint_mask, save_dir=''):
         if inpaint_mask[f] == 1:
             img = cv2.circle(img, (int(coor_inpaint[f][0] * WIDTH), int(coor_inpaint[f][1] * HEIGHT)), 2, (0, 255, 0), -1)
     
-    cv2.imwrite(f'{save_dir}/cur_pred_InpaintNet.png', img)
+    cv2.imwrite(f'{save_dir}/cur_pred_InpaintNet.{IMG_FORMAT}', img)
 
 def plot_diff_hist(pred_dict_base, pred_dict_refine, split, save_dir):
     """ Plot difference histogram. (difference is calculated in input space)
@@ -205,7 +205,7 @@ def plot_diff_hist(pred_dict_base, pred_dict_refine, split, save_dir):
             pred_refine = pred_dict_refine[rally_key]
             match_id, rally_id = rally_key.split('_')[0], '_'.join(rally_key.split('_')[1:])
             start_f, end_f = start_frame[rally_key], end_frame[rally_key]
-            w, h = Image.open(os.path.join(data_dir, split, f'match{match_id}', 'frame', rally_id, '0.png')).size
+            w, h = Image.open(os.path.join(data_dir, split, f'match{match_id}', 'frame', rally_id, f'0.{IMG_FORMAT}')).size
             w_scaler, h_scaler = w/WIDTH, h/HEIGHT
 
             # Load ground truth
@@ -286,5 +286,5 @@ def plot_diff_hist(pred_dict_base, pred_dict_refine, split, save_dir):
         plt.ylabel('Sample Count')
         plt.legend()
         plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f'{err_type}_diff.png'))
+        plt.savefig(os.path.join(save_dir, f'{err_type}_diff.{IMG_FORMAT}'))
         plt.clf()
