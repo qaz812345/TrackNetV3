@@ -125,6 +125,7 @@ scenarios to strengthen the network’s robustness. Given that a shuttlecock can
         ├── match2/
         └── match3/
 ```
+* Attributes in each csv files: `Frame, Visibility, X, Y`
 ### 2. Train Tracking Module
 * Train the tracking module from scratch
     ```
