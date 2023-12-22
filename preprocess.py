@@ -17,6 +17,8 @@ if os.path.exists('corrected_test_label'):
         if not os.path.exists(os.path.join(data_dir, 'test', match_dir, 'corrected_csv')):
             shutil.copytree(os.path.join('corrected_test_label', match_dir, 'corrected_csv'),
                             os.path.join(data_dir, 'test', match_dir, 'corrected_csv'))
+            shutil.copy(os.path.join('corrected_test_label', 'drop_frame.json'),
+                        os.path.join(data_dir, 'drop_frame.json'))
 
 # Generate frames from videos
 for split in ['train', 'test']:
