@@ -200,7 +200,7 @@ if __name__ == '__main__':
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
 
             for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader)):
-                coor_pred, coor, inpaint_mask = coor_pred.float(), coor.float(), inpaint_mask.float()
+                coor_pred, inpaint_mask = coor_pred.float(), inpaint_mask.float()
                 with torch.no_grad():
                     coor_inpaint = inpaintnet(coor_pred.cuda(), inpaint_mask.cuda()).detach().cpu()
                     coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask) # replace predicted coordinates with inpainted coordinates
