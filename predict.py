@@ -74,7 +74,7 @@ if __name__ == '__main__':
     parser.add_argument('--tracknet_file', type=str, help='file path of the TrackNet model checkpoint')
     parser.add_argument('--inpaintnet_file', type=str, default='', help='file path of the InpaintNet model checkpoint')
     parser.add_argument('--batch_size', type=int, default=16, help='batch size for inference')
-    parser.add_argument('--eval_mode', type=str, default='weight', choices=['average', 'weight'], help='evaluation mode')
+    parser.add_argument('--eval_mode', type=str, default='weight', choices=['nonoverlap', 'average', 'weight'], help='evaluation mode')
     parser.add_argument('--save_dir', type=str, default='pred_result', help='directory to save the prediction result')
     parser.add_argument('--output_video', action='store_true', default=False, help='whether to output video with predicted trajectory')
     parser.add_argument('--traj_len', type=int, default=8, help='length of trajectory to draw on video')

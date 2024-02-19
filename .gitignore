@@ -4,8 +4,10 @@ test/
 ckpts/
 __pycache__/
 utils/__pycache__/
+prediction/
 dataset_test.py
 fps_exp.py
 worker.py
 temp.py
 model_compare.py
+*.sh
