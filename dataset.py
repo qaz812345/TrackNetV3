@@ -79,7 +79,6 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         self.data_mode = data_mode
         self.bg_mode = bg_mode
         self.frame_alpha = frame_alpha
-        self.rally_dict = self._get_rally_dict()
 
         # Data for inference
         self.frame_arr = frame_arr
@@ -105,6 +104,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             self.data_dict, self.img_config = self._gen_input_from_pred_dict()
         else:
             # Generate rally image configuration file
+            self.rally_dict = self._get_rally_dict()
             img_config_file = os.path.join(self.root_dir, f'img_config_{self.HEIGHT}x{self.WIDTH}_{self.split}.npz')
             if not os.path.exists(img_config_file):
                 self._gen_rally_img_congif_file(img_config_file)
