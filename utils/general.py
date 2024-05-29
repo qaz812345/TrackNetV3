@@ -79,6 +79,22 @@ def get_model(model_name, seq_len=None, bg_mode=None):
     
     return model
 
+def show_model_size(model):
+    """ Estimate the size of the model.
+        reference: https://discuss.pytorch.org/t/finding-model-size/130275/2
+
+        Args:
+            model (torch.nn.Module): target model
+    """
+    param_size = 0
+    for param in model.parameters():
+        param_size += param.nelement() * param.element_size()
+    buffer_size = 0
+    for buffer in model.buffers():
+        buffer_size += buffer.nelement() * buffer.element_size()
+    size_all_mb = (param_size + buffer_size) / 1024**2
+    print(f'Model size: {size_all_mb:.3f}MB')
+
 def list_dirs(directory):
     """ Extension of os.listdir which return the directory pathes including input directory.
 
@@ -191,17 +207,12 @@ def generate_frames(video_file):
 
         Returns:
             frame_list (List[numpy.ndarray]): List of sampled frames
-            fps (int): Frame per second of the video
-            (w, h) (Tuple[int, int]): Width and height of the video
     """
 
     assert video_file[-4:] == '.mp4', 'Invalid video file format.'
 
     # Get camera parameters
     cap = cv2.VideoCapture(video_file)
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_list = []
     success = True
 
@@ -211,7 +222,7 @@ def generate_frames(video_file):
         if success:
             frame_list.append(frame)
             
-    return frame_list, fps, (w, h)
+    return frame_list
 
 def draw_traj(img, traj, radius=3, color='red'):
     """ Draw trajectory on the image.
@@ -238,13 +249,11 @@ def draw_traj(img, traj, radius=3, color='red'):
 
     return img
 
-def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, label_df=None):
+def write_pred_video(video_file, pred_dict, save_file, traj_len=8, label_df=None):
     """ Write a video with prediction result.
 
         Args:
-            frame_list (List[numpy.ndarray]): List of sampled frames
-            video_cofig (Dict): Video configuration
-                Format: {'fps': fps (int), 'shape': (w, h) (Tuple[int, int])}
+            video_file (str): File path of the input video file
             pred_dict (Dict): Prediction result
                 Format: {'Frame': frame_id (List[int]),
                          'X': x_pred (List[int]),
@@ -257,6 +266,11 @@ def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, 
         Returns:
             None
     """
+    # Read video
+    cap = cv2.VideoCapture(video_file)
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
 
     # Read ground truth label if exists
     if label_df is not None:
@@ -266,8 +280,7 @@ def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, 
     x_pred, y_pred, vis_pred = pred_dict['X'], pred_dict['Y'], pred_dict['Visibility']
 
     # Video config
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(save_file, fourcc, video_cofig['fps'], video_cofig['shape'])
+    out = cv2.VideoWriter(save_file, fourcc, fps, (w, h))
     
     # Create a queue for storing trajectory
     pred_queue = deque()
@@ -275,7 +288,13 @@ def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, 
         gt_queue = deque()
     
     # Draw label and prediction trajectory
-    for i, frame in enumerate(frame_list):
+    #for i, frame in enumerate(frame_list):
+    i = 0
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+        
         # Check capacity of queue
         if len(pred_queue) >= traj_len:
             pred_queue.pop()
@@ -295,7 +314,10 @@ def write_pred_video(frame_list, video_cofig, pred_dict, save_file, traj_len=8, 
         frame = draw_traj(frame, pred_queue, color='yellow')
 
         out.write(frame)
+        i+=1
+
     out.release()
+    cap.release()
 
 def write_pred_csv(pred_dict, save_file, save_inpaint_mask=False):
     """ Write prediction result to csv file.

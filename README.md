@@ -65,10 +65,16 @@ scenarios to strengthen the network’s robustness. Given that a shuttlecock can
     ```
     python predict.py --video_file test.mp4 --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir prediction
     ```
-
 * Predict the label csv from the video, and output a video with predicted trajectory
     ```
     python predict.py --video_file test.mp4 --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir prediction --output_video
+    ```
+* For large video
+    * Enable the ```--large_video``` flag to use an IterableDataset instead of the normal Dataset, which prevents memory errors. Note that this will decrease the inference speed.
+    * Use ```--max_sample_num``` to set the number of samples for background estimation.
+    * Use ```--video_range``` to specify the start and end seconds of the video for background estimation.
+    ```
+    python predict.py --video_file test.mp4 --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir prediction --large_video --video_range 324,330
     ```
 
 ## Training

@@ -1,16 +1,20 @@
 import os
+import cv2
 import math
 import parse
 import numpy as np
 import pandas as pd
 from PIL import Image
 from tqdm import tqdm
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 from utils.general import get_rally_dirs, get_match_median, HEIGHT, WIDTH, SIGMA, IMG_FORMAT
 
 data_dir = 'data'
 
 class Shuttlecock_Trajectory_Dataset(Dataset):
+    """ Shuttlecock_Trajectory_Dataset
+            Dataset description: https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw
+    """
     def __init__(self,
         root_dir=data_dir,
         split='train',
@@ -26,10 +30,10 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         debug=False,
         HEIGHT=HEIGHT,
         WIDTH=WIDTH,
-        SIGMA=SIGMA
+        SIGMA=SIGMA,
+        median=None
     ):
-        """ Shuttlecock_Trajectory_Dataset
-            Dataset description: https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw
+        """ Initialize the dataset
 
             Args:
                 root_dir (str): File path of root directory of the dataset
@@ -58,6 +62,10 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                              'Img_shape': img_shape (Tuple[int])}
                 padding (bool): Padding the last frame if the frame sequence is shorter than the input sequence
                 debug (bool): Debug mode
+                HEIGHT (int): Height of the image for input.
+                WIDTH (int): Width of the image for input.
+                SIGMA (int): Sigma of the Gaussian heatmap which control the label size.
+                median (numpy.ndarray): Median image
         """
 
         assert split in ['train', 'test', 'val'], f'Invalid split: {split}, should be train, test or val'
@@ -91,7 +99,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             assert self.data_mode == 'heatmap', f'Invalid data_mode: {self.data_mode}, frame_arr only for heatmap mode' 
             self.data_dict, self.img_config = self._gen_input_from_frame_arr()
             if self.bg_mode:
-                median = np.median(self.frame_arr, 0)
+                if median is None:
+                    median = np.median(self.frame_arr, 0)
                 if self.bg_mode == 'concat':
                     median = Image.fromarray(median.astype('uint8'))
                     median = np.array(median.resize(size=(self.WIDTH, self.HEIGHT)))
@@ -405,7 +414,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         return len(self.data_dict['id'])
 
     def __getitem__(self, idx):
-        """ Return the data of the given index 
+        """ Return the data of the given index.
 
             For training and evaluation:
                 'heatmap': Return data_idx, frames, heatmaps, tmp_coor, tmp_vis
@@ -422,7 +431,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             if self.bg_mode:
                 median_img = self.median
             
-            # Read images
+            # Process the frame sequence
             frames = np.array([]).reshape(0, self.HEIGHT, self.WIDTH)
             for i in range(self.seq_len):
                 img = Image.fromarray(imgs[i])
@@ -655,3 +664,151 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             return data_idx, coor_pred, coor, vis_pred.reshape(-1, 1), vis.reshape(-1, 1), inpaint.reshape(-1, 1)
         else:
             raise NotImplementedError
+
+
+class Video_IterableDataset(IterableDataset):
+    """ Dataset for inference especially for large video. """
+    def __init__(self,
+        video_file,
+        seq_len=8,
+        sliding_step=1,
+        bg_mode='',
+        HEIGHT=HEIGHT,
+        WIDTH=WIDTH,
+        max_sample_num=1800,
+        video_range=None,
+        median=None
+    ):
+        """ Initialize the dataset
+            Args:
+                video_file (str}: File path of the video.
+                seq_len (int): Length of the input sequence.
+                sliding_step (int): Sliding step of the sliding window.
+                bg_mode (str): Background mode
+                    Choices:
+                        - '': Return original frame sequence
+                        - 'subtract': Return the difference frame sequence
+                        - 'subtract_concat': Return the frame sequence with RGB and difference frame channels
+                        - 'concat': Return the frame sequence with background as the first frame
+                HEIGHT (int): Height of the image for input.
+                WIDTH (int): Width of the image for input.
+                max_sample_num (int): Maximum number of frames to sample for generating median image.
+                video_range (Tuple[int]): Range of start second and end second of the video for generating median image.
+                median (np.ndarray): Median image.
+        """
+        # Image size
+        self.HEIGHT = HEIGHT
+        self.WIDTH = WIDTH
+
+        self.video_file = video_file
+        self.cap = cv2.VideoCapture(self.video_file)
+        self.video_len = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+        self.w, self.h = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.w_scaler, self.h_scaler = self.w / self.WIDTH, self.h / self.HEIGHT
+
+
+        self.seq_len = seq_len
+        self.sliding_step = sliding_step
+        self.bg_mode = bg_mode
+        if self.bg_mode:
+            self.median = median if median is not None else self.__gen_median__(max_sample_num, video_range)
+
+    def __iter__(self):
+        """ Return the data squentially. """
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        success = True
+        start_f_id, end_f_id = 0, 0
+        frame_list = []
+        while success:
+            # Sample frames
+            while len(frame_list) < self.seq_len:
+                success, frame = self.cap.read()
+                if not success:
+                    break
+                frame_list.append(frame)
+                end_f_id += 1
+
+            # Form a sequence
+            data_idx = [(0, i) for i in range(start_f_id, end_f_id)]
+            if len(data_idx) < self.seq_len:
+                # Padding the last sequence if imcompleted
+                data_idx.extend([(0, end_f_id-1)]*(self.seq_len - len(data_idx)))
+                frame_list.extend([frame_list[-1]]*(self.seq_len - len(frame_list)))
+            data_idx = np.array(data_idx)
+            frames = self.__process__(np.array(frame_list)[..., ::-1])
+            yield data_idx, frames
+
+            # Update the sliding window
+            frame_list = frame_list[self.sliding_step:]
+            start_f_id = start_f_id + self.sliding_step
+
+        self.cap.release()
+
+    def __gen_median__(self, max_sample_num, video_range):
+        """ Generate the median image.
+
+            Args:
+                max_sample_num (int): Maximum number of frames to sample for generating median image.
+                video_range (Tuple[int]): Range of start second and end second of the video for generating median image.
+        """
+        print('Generate median image...')
+        if video_range is None:
+            start_frame, end_frame = 0, self.video_len
+        else:
+            start_frame = max(0, video_range[0] * self.fps)
+            end_frame = min(video_range[1] * self.fps, self.video_len)
+        video_seg_len = end_frame - start_frame
+
+        if video_seg_len > max_sample_num:
+            sample_step = video_seg_len // max_sample_num
+        else:
+            sample_step = 1
+        
+        frame_list = []
+        for i in range(start_frame, end_frame, sample_step):
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+            success, frame = self.cap.read()
+            if not success:
+                break
+            frame_list.append(frame)
+        median = np.median(frame_list, 0)[..., ::-1] # BGR to RGB
+        if self.bg_mode == 'concat':
+            median = Image.fromarray(median.astype('uint8'))
+            median = np.array(median.resize(size=(self.WIDTH, self.HEIGHT)))
+            median = np.moveaxis(median, -1, 0)
+        print('Median image generated.')
+        return median
+    
+    def __process__(self, imgs):
+        """ Process the frame sequence. """
+        if self.bg_mode:
+            median_img = self.median
+        frames = np.array([]).reshape(0, self.HEIGHT, self.WIDTH)
+        for i in range(self.seq_len):
+            img = Image.fromarray(imgs[i])
+            if self.bg_mode == 'subtract':
+                img = Image.fromarray(np.sum(np.absolute(img - median_img), 2).astype('uint8'))
+                img = np.array(img.resize(size=(self.WIDTH, self.HEIGHT)))
+                img = img.reshape(1, self.HEIGHT, self.WIDTH)
+            elif self.bg_mode == 'subtract_concat':
+                diff_img = Image.fromarray(np.sum(np.absolute(img - median_img), 2).astype('uint8'))
+                diff_img = np.array(diff_img.resize(size=(self.WIDTH, self.HEIGHT)))
+                diff_img = diff_img.reshape(1, self.HEIGHT, self.WIDTH)
+                img = np.array(img.resize(size=(self.WIDTH, self.HEIGHT)))
+                img = np.moveaxis(img, -1, 0)
+                img = np.concatenate((img, diff_img), axis=0)
+            else:
+                img = np.array(img.resize(size=(self.WIDTH, self.HEIGHT)))
+                img = np.moveaxis(img, -1, 0)
+            
+            frames = np.concatenate((frames, img), axis=0)
+        
+        if self.bg_mode == 'concat':
+            frames = np.concatenate((median_img, frames), axis=0)
+        
+        # Normalization
+        frames /= 255.
+        return frames
+
+        

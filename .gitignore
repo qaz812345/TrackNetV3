@@ -2,12 +2,17 @@
 data/
 test/
 ckpts/
+figure/
 __pycache__/
 utils/__pycache__/
 prediction/
+test_prediction/
 dataset_test.py
 fps_exp.py
+fps_exp_1.py
 worker.py
 temp.py
 model_compare.py
+predict_old.py
 *.sh
+*.mp4
