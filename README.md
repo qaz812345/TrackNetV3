@@ -80,17 +80,11 @@ scenarios to strengthen the network’s robustness. Given that a shuttlecock can
 ## Training
 ### 1. Prepare Dataset
 * Download [Shuttlecock Trajectory Dataset](https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw)
-* Set the data root directory to ```data_dir``` in ```dataset.py```.
-* Data Preprocessing
-    ```
-    python preprocess.py
-    ```
-* The `frame` directories and the `val` directory will be generated after preprocessing.
-* Check the estimated background images in `<data_dir>/median`
-    * If available, the dataset will use the median image of the match; otherwise, it will use the median image of the rally.
-    * For example, you can exclude `train/match16/median.npz` due to camera angle discrepancies; therefore, the dataset will resort to the median image of the rally within match 16.
-* The preprocessed dataset will be cached using npy files, so please ensure that you delete these files if you make any modifications to the dataset.
-* Dataset File Structure:
+* Adjust file structure:
+    1. Merge the `Professional` and `Amateur` match directories into a single `train` directory.
+    2. Rename the `Amateur` match directories to start from `match24` through `match26`.
+    3. Rename the `Test` directory to `test`.
+* Dataset file structure:
 ```
   data
     ├─ train
@@ -133,6 +127,17 @@ scenarios to strengthen the network’s robustness. Given that a shuttlecock can
         └── match3/
 ```
 * Attributes in each csv files: `Frame, Visibility, X, Y`
+* Data preprocessing
+    ```
+    python preprocess.py
+    ```
+* The `frame` directories and the `val` directory will be generated after preprocessing.
+* Check the estimated background images in `<data_dir>/median`
+    * If available, the dataset will use the median image of the match; otherwise, it will use the median image of the rally.
+    * For example, you can exclude `train/match16/median.npz` due to camera angle discrepancies; therefore, the dataset will resort to the median image of the rally within match 16.
+* Set the data root directory to `data_dir` in `dataset.py`.
+    * `dataset.py` will generate the image mapping for each sample and cache the result in `.npy` files.
+    * If you modify any related functions in `dataset.py`, please ensure you delete these cached files.
 ### 2. Train Tracking Module
 * Train the tracking module from scratch
     ```
@@ -144,7 +149,7 @@ scenarios to strengthen the network’s robustness. Given that a shuttlecock can
     python train.py --model_name TrackNet --epochs 30 --save_dir exp --resume_training --verbose
     ```
 
-### 3. Generate Predited Trajectories and Inpainting Masks
+### 3. Generate Predicted Trajectories and Inpainting Masks
 * Generate predicted trajectories and inpainting masks for training rectification module
     * Noted that the coordinate range corresponds to the input spatial dimensions, not the size of the original image.
     ```
@@ -216,3 +221,8 @@ scenarios to strengthen the network’s robustness. Given that a shuttlecock can
         <img src="./figure/ErrorAnalysisUI.png" width="70%"/>
     </a>
 </div>
+
+## Reference
+* TrackNetV2: https://nol.cs.nctu.edu.tw:234/open-source/TrackNetv2
+* Shuttlecock Trajectory Dataset: https://hackmd.io/@TUIK/rJkRW54cU
+* Labeling Tool: https://github.com/Chang-Chia-Chi/TrackNet-Badminton-Tracking-tensorflow2?tab=readme-ov-file#label
