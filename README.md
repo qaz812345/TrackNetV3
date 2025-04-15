@@ -1,4 +1,4 @@
-# TrackNetV3
+# TrackNetV3: Enhancing ShuttleCock Tracking with Augmentations and Trajectory Rectification
 We present TrackNetV3, a model composed of two core modules: trajectory prediction and rectification. The trajectory prediction module leverages an estimated background as auxiliary data to locate the shuttlecock in spite of the fluctuating visual interferences. This module also incorporates mixup data augmentation to formulate complex
 scenarios to strengthen the network’s robustness. Given that a shuttlecock can occasionally be obstructed, we create repair masks by analyzing the predicted trajectory, subsequently rectifying the path via inpainting.
 [[paper](https://dl.acm.org/doi/10.1145/3595916.3626370)]
