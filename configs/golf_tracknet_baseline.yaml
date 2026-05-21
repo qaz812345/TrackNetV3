@@ -1,0 +1,30 @@
+# Baseline golf TrackNet config — portrait 9:16 input, binary disk heatmap, no background.
+
+seed: 13
+
+# Portrait input: 9:16, same pixel count as original 288x512 landscape
+input_height: 512
+input_width: 288
+
+# Temporal sequence
+seq_len: 8
+sliding_step: 1
+
+# Training
+batch_size: 4
+epochs: 30
+learning_rate: 0.001
+optimizer: Adam
+mixed_precision: false
+num_workers: 4
+
+# Background mode: '' | subtract | subtract_concat | concat
+bg_mode: ""
+
+# Heatmap
+target_mode: binary_disk  # binary_disk | gaussian
+sigma: 2.5
+
+# Evaluation
+threshold: 0.5
+eval_tolerance_px_input: 4
