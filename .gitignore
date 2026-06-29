@@ -6,6 +6,7 @@ figure/
 __pycache__/
 utils/__pycache__/
 prediction/
+videos/
 test_prediction/
 dataset_test.py
 fps_exp.py

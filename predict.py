@@ -95,16 +95,18 @@ if __name__ == '__main__':
         os.makedirs(args.save_dir)
     
     # Load model
-    tracknet_ckpt = torch.load(args.tracknet_file)
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
+    tracknet_ckpt = torch.load(args.tracknet_file, map_location=device)
     tracknet_seq_len = tracknet_ckpt['param_dict']['seq_len']
     bg_mode = tracknet_ckpt['param_dict']['bg_mode']
-    tracknet = get_model('TrackNet', tracknet_seq_len, bg_mode).cuda()
+    tracknet = get_model('TrackNet', tracknet_seq_len, bg_mode).to(device)
     tracknet.load_state_dict(tracknet_ckpt['model'])
 
     if args.inpaintnet_file:
-        inpaintnet_ckpt = torch.load(args.inpaintnet_file)
+        inpaintnet_ckpt = torch.load(args.inpaintnet_file, map_location=device)
         inpaintnet_seq_len = inpaintnet_ckpt['param_dict']['seq_len']
-        inpaintnet = get_model('InpaintNet').cuda()
+        inpaintnet = get_model('InpaintNet').to(device)
         inpaintnet.load_state_dict(inpaintnet_ckpt['model'])
     else:
         inpaintnet = None
@@ -135,7 +137,7 @@ if __name__ == '__main__':
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
 
         for step, (i, x) in enumerate(tqdm(data_loader)):
-            x = x.float().cuda()
+            x = x.float().to(device)
             with torch.no_grad():
                 y_pred = tracknet(x).detach().cpu()
             
@@ -168,7 +170,7 @@ if __name__ == '__main__':
         y_pred_buffer = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
         weight = get_ensemble_weight(seq_len, args.eval_mode)
         for step, (i, x) in enumerate(tqdm(data_loader)):
-            x = x.float().cuda()
+            x = x.float().to(device)
             b_size, seq_len = i.shape[0], i.shape[1]
             with torch.no_grad():
                 y_pred = tracknet(x).detach().cpu()
@@ -224,7 +226,7 @@ if __name__ == '__main__':
             for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader)):
                 coor_pred, inpaint_mask = coor_pred.float(), inpaint_mask.float()
                 with torch.no_grad():
-                    coor_inpaint = inpaintnet(coor_pred.cuda(), inpaint_mask.cuda()).detach().cpu()
+                    coor_inpaint = inpaintnet(coor_pred.to(device), inpaint_mask.to(device)).detach().cpu()
                     coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask) # replace predicted coordinates with inpainted coordinates
                 
                 # Thresholding
@@ -253,7 +255,7 @@ if __name__ == '__main__':
                 coor_pred, inpaint_mask = coor_pred.float(), inpaint_mask.float()
                 b_size = i.shape[0]
                 with torch.no_grad():
-                    coor_inpaint = inpaintnet(coor_pred.cuda(), inpaint_mask.cuda()).detach().cpu()
+                    coor_inpaint = inpaintnet(coor_pred.to(device), inpaint_mask.to(device)).detach().cpu()
                     coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask)
                 
                 # Thresholding
