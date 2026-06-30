@@ -142,7 +142,7 @@ if __name__ == '__main__':
         # Create dataset with non-overlap sampling
         stage_start_time = time.perf_counter()
         if large_video:
-            dataset = Video_IterableDataset(video_file, seq_len=seq_len, sliding_step=seq_len, bg_mode=bg_mode, 
+            dataset = Video_IterableDataset(video_file, seq_len=seq_len, sliding_step=seq_len, bg_mode=bg_mode,
                                             max_sample_num=args.max_sample_num, video_range=video_range)
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, drop_last=False)
             print(f'Video length: {dataset.video_len}')
@@ -155,7 +155,7 @@ if __name__ == '__main__':
         stage_times['median_s'] += time.perf_counter() - stage_start_time
 
         stage_start_time = time.perf_counter()
-        for step, (i, x) in enumerate(tqdm(data_loader)):
+        for step, (i, x) in enumerate(tqdm(data_loader, desc='tracknet_inference_s')):
             x = x.float().to(device)
             with torch.no_grad():
                 y_pred = tracknet(x).detach().cpu()
@@ -192,7 +192,7 @@ if __name__ == '__main__':
         y_pred_buffer = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
         weight = get_ensemble_weight(seq_len, args.eval_mode)
         stage_start_time = time.perf_counter()
-        for step, (i, x) in enumerate(tqdm(data_loader)):
+        for step, (i, x) in enumerate(tqdm(data_loader, desc='tracknet_inference_s')):
             x = x.float().to(device)
             b_size, seq_len = i.shape[0], i.shape[1]
             with torch.no_grad():
@@ -248,7 +248,7 @@ if __name__ == '__main__':
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
 
             stage_start_time = time.perf_counter()
-            for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader)):
+            for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader, desc='inpaintnet_inference_s')):
                 coor_pred, inpaint_mask = coor_pred.float(), inpaint_mask.float()
                 with torch.no_grad():
                     coor_inpaint = inpaintnet(coor_pred.to(device), inpaint_mask.to(device)).detach().cpu()
@@ -278,7 +278,7 @@ if __name__ == '__main__':
             coor_inpaint_buffer = torch.zeros((buffer_size, seq_len, 2), dtype=torch.float32)
             
             stage_start_time = time.perf_counter()
-            for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader)):
+            for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader, desc='inpaintnet_inference_s')):
                 coor_pred, inpaint_mask = coor_pred.float(), inpaint_mask.float()
                 b_size = i.shape[0]
                 with torch.no_grad():
