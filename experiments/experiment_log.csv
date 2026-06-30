@@ -1,0 +1,8 @@
+date,id,video_info,angle,background,preprocessing,resolution,fps,duration_s,bitrate,runtime_s,model_load_s,median_s,inference_s,write_csv_s,video_merge_s,result_notes,input_video,memo,accuracy,command
+2026-06-27,1,BWFの試合映像 沖本,俯瞰,グリーンマット,なし,854x480,24,55,478421,,,,,,,,test-okimoto.mp4,,,
+2026-06-27,3,全国選抜2024 山田,俯瞰,普通のコート,なし,1920x1080,60,40,14062749,1164,,,,,,,yamada-senbatu-crop.mp4,,,
+2026-06-27,4,全国選抜2024山田,俯瞰,普通のコート,あり,1280x720,30,40,968864,,,,,,,,formated-yamada-senbatu-crop-720p30.mp4,,,
+2026-06-28,5,国体2025 長束,右斜め上,グリーンマット,あり,1280x720,30,30,2825850,,,,,,,,,,
+2026-06-28,6,総合2016 エンワタ,ギリ俯瞰,グリーンマット,あり,1280x720,30,93,1149310,,,,,,,,,,
+2026-06-28,7,神々の遊び 3v3,横、手ブレ,選手の雑踏,あり,1280x720,30,30,2825850,,,,,,,,,,
+2026-06-28,8,宮大体育館 辰樹史弥,左下,体育館の風景,あり,1280x720,30,358,1328318,,,,,,,,,,

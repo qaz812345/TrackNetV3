@@ -77,6 +77,13 @@ scenarios to strengthen the network’s robustness. Given that a shuttlecock can
     python predict.py --video_file test.mp4 --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir prediction --large_video --video_range 324,330
     ```
 
+### Experiment logging
+* `predict.py` appends a row to `experiments/experiment_log.csv` after each successful inference run.
+    ```
+    python predict.py --video_file videos/test-okimoto.mp4 --tracknet_file ckpts/TrackNet_best.pt --inpaintnet_file ckpts/InpaintNet_best.pt --save_dir prediction
+    ```
+* Use `--no_experiment_log` to disable automatic logging for a run.
+
 ## Training
 ### 1. Prepare Dataset
 * Download [Shuttlecock Trajectory Dataset](https://hackmd.io/Nf8Rh1NrSrqNUzmO0sQKZw)
