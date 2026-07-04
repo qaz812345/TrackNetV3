@@ -270,7 +270,8 @@ def write_pred_video(video_file, pred_dict, save_file, traj_len=8, label_df=None
     cap = cv2.VideoCapture(video_file)
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+    # fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
     # Read ground truth label if exists
     if label_df is not None:
