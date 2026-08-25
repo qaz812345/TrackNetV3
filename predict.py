@@ -1,6 +1,9 @@
 import os
 import argparse
+import sys
+import time
 import numpy as np
+import cv2
 from tqdm import tqdm
 
 import torch
@@ -8,6 +11,7 @@ from torch.utils.data import DataLoader
 
 from test import predict_location, get_ensemble_weight, generate_inpaint_mask
 from dataset import Shuttlecock_Trajectory_Dataset, Video_IterableDataset
+from utils.experiment_log import append_prediction_log
 from utils.general import *
 
 
@@ -81,7 +85,16 @@ if __name__ == '__main__':
     parser.add_argument('--large_video', action='store_true', default=False, help='whether to process large video')
     parser.add_argument('--output_video', action='store_true', default=False, help='whether to output video with predicted trajectory')
     parser.add_argument('--traj_len', type=int, default=8, help='length of trajectory to draw on video')
+    parser.add_argument('--no_experiment_log', action='store_true', default=False, help='disable automatic experiment logging')
     args = parser.parse_args()
+    run_start_time = time.perf_counter()
+    stage_times = {
+        'model_load_s': 0.0,
+        'median_s': 0.0,
+        'inference_s': 0.0,
+        'write_csv_s': 0.0,
+        'video_merge_s': 0.0,
+    }
 
     num_workers = args.batch_size if args.batch_size <= 16 else 16
     video_file = args.video_file
@@ -95,22 +108,27 @@ if __name__ == '__main__':
         os.makedirs(args.save_dir)
     
     # Load model
-    tracknet_ckpt = torch.load(args.tracknet_file)
+    stage_start_time = time.perf_counter()
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
+    tracknet_ckpt = torch.load(args.tracknet_file, map_location=device)
     tracknet_seq_len = tracknet_ckpt['param_dict']['seq_len']
     bg_mode = tracknet_ckpt['param_dict']['bg_mode']
-    tracknet = get_model('TrackNet', tracknet_seq_len, bg_mode).cuda()
+    tracknet = get_model('TrackNet', tracknet_seq_len, bg_mode).to(device)
     tracknet.load_state_dict(tracknet_ckpt['model'])
 
     if args.inpaintnet_file:
-        inpaintnet_ckpt = torch.load(args.inpaintnet_file)
+        inpaintnet_ckpt = torch.load(args.inpaintnet_file, map_location=device)
         inpaintnet_seq_len = inpaintnet_ckpt['param_dict']['seq_len']
-        inpaintnet = get_model('InpaintNet').cuda()
+        inpaintnet = get_model('InpaintNet').to(device)
         inpaintnet.load_state_dict(inpaintnet_ckpt['model'])
     else:
         inpaintnet = None
+    stage_times['model_load_s'] += time.perf_counter() - stage_start_time
 
     cap = cv2.VideoCapture(args.video_file)
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    cap.release()
     w_scaler, h_scaler = w / WIDTH, h / HEIGHT
     img_scaler = (w_scaler, h_scaler)
 
@@ -122,8 +140,9 @@ if __name__ == '__main__':
     seq_len = tracknet_seq_len
     if args.eval_mode == 'nonoverlap':
         # Create dataset with non-overlap sampling
+        stage_start_time = time.perf_counter()
         if large_video:
-            dataset = Video_IterableDataset(video_file, seq_len=seq_len, sliding_step=seq_len, bg_mode=bg_mode, 
+            dataset = Video_IterableDataset(video_file, seq_len=seq_len, sliding_step=seq_len, bg_mode=bg_mode,
                                             max_sample_num=args.max_sample_num, video_range=video_range)
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, drop_last=False)
             print(f'Video length: {dataset.video_len}')
@@ -133,9 +152,11 @@ if __name__ == '__main__':
             dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=seq_len, data_mode='heatmap', bg_mode=bg_mode,
                                                  frame_arr=np.array(frame_list)[:, :, :, ::-1], padding=True)
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
+        stage_times['median_s'] += time.perf_counter() - stage_start_time
 
-        for step, (i, x) in enumerate(tqdm(data_loader)):
-            x = x.float().cuda()
+        stage_start_time = time.perf_counter()
+        for step, (i, x) in enumerate(tqdm(data_loader, desc='tracknet_inference_s')):
+            x = x.float().to(device)
             with torch.no_grad():
                 y_pred = tracknet(x).detach().cpu()
             
@@ -143,8 +164,10 @@ if __name__ == '__main__':
             tmp_pred = predict(i, y_pred=y_pred, img_scaler=img_scaler)
             for key in tmp_pred.keys():
                 tracknet_pred_dict[key].extend(tmp_pred[key])
+        stage_times['inference_s'] += time.perf_counter() - stage_start_time
     else:
         # Create dataset with overlap sampling for temporal ensemble
+        stage_start_time = time.perf_counter()
         if large_video:
             dataset = Video_IterableDataset(video_file, seq_len=seq_len, sliding_step=1, bg_mode=bg_mode,
                                             max_sample_num=args.max_sample_num, video_range=video_range)
@@ -159,6 +182,7 @@ if __name__ == '__main__':
                                                  frame_arr=np.array(frame_list)[:, :, :, ::-1])
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
             video_len = len(frame_list)
+        stage_times['median_s'] += time.perf_counter() - stage_start_time
         
         # Init prediction buffer params
         num_sample, sample_count = video_len-seq_len+1, 0
@@ -167,8 +191,9 @@ if __name__ == '__main__':
         frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
         y_pred_buffer = torch.zeros((buffer_size, seq_len, HEIGHT, WIDTH), dtype=torch.float32)
         weight = get_ensemble_weight(seq_len, args.eval_mode)
-        for step, (i, x) in enumerate(tqdm(data_loader)):
-            x = x.float().cuda()
+        stage_start_time = time.perf_counter()
+        for step, (i, x) in enumerate(tqdm(data_loader, desc='tracknet_inference_s')):
+            x = x.float().to(device)
             b_size, seq_len = i.shape[0], i.shape[1]
             with torch.no_grad():
                 y_pred = tracknet(x).detach().cpu()
@@ -207,6 +232,7 @@ if __name__ == '__main__':
 
             # Update buffer, keep last predictions for ensemble in next iteration
             y_pred_buffer = y_pred_buffer[-buffer_size:]
+        stage_times['inference_s'] += time.perf_counter() - stage_start_time
 
     #assert video_len == len(tracknet_pred_dict['Frame']), 'Prediction length mismatch'
     # Test on TrackNetV3 (TrackNet + InpaintNet)
@@ -221,10 +247,11 @@ if __name__ == '__main__':
             dataset = Shuttlecock_Trajectory_Dataset(seq_len=seq_len, sliding_step=seq_len, data_mode='coordinate', pred_dict=tracknet_pred_dict, padding=True)
             data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
 
-            for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader)):
+            stage_start_time = time.perf_counter()
+            for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader, desc='inpaintnet_inference_s')):
                 coor_pred, inpaint_mask = coor_pred.float(), inpaint_mask.float()
                 with torch.no_grad():
-                    coor_inpaint = inpaintnet(coor_pred.cuda(), inpaint_mask.cuda()).detach().cpu()
+                    coor_inpaint = inpaintnet(coor_pred.to(device), inpaint_mask.to(device)).detach().cpu()
                     coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask) # replace predicted coordinates with inpainted coordinates
                 
                 # Thresholding
@@ -235,6 +262,7 @@ if __name__ == '__main__':
                 tmp_pred = predict(i, c_pred=coor_inpaint, img_scaler=img_scaler)
                 for key in tmp_pred.keys():
                     inpaint_pred_dict[key].extend(tmp_pred[key])
+            stage_times['inference_s'] += time.perf_counter() - stage_start_time
                 
         else:
             # Create dataset with overlap sampling for temporal ensemble
@@ -249,11 +277,12 @@ if __name__ == '__main__':
             frame_i = torch.arange(seq_len-1, -1, -1) # [7, 6, 5, 4, 3, 2, 1, 0]
             coor_inpaint_buffer = torch.zeros((buffer_size, seq_len, 2), dtype=torch.float32)
             
-            for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader)):
+            stage_start_time = time.perf_counter()
+            for step, (i, coor_pred, inpaint_mask) in enumerate(tqdm(data_loader, desc='inpaintnet_inference_s')):
                 coor_pred, inpaint_mask = coor_pred.float(), inpaint_mask.float()
                 b_size = i.shape[0]
                 with torch.no_grad():
-                    coor_inpaint = inpaintnet(coor_pred.cuda(), inpaint_mask.cuda()).detach().cpu()
+                    coor_inpaint = inpaintnet(coor_pred.to(device), inpaint_mask.to(device)).detach().cpu()
                     coor_inpaint = coor_inpaint * inpaint_mask + coor_pred * (1-inpaint_mask)
                 
                 # Thresholding
@@ -299,14 +328,24 @@ if __name__ == '__main__':
                 
                 # Update buffer, keep last predictions for ensemble in next iteration
                 coor_inpaint_buffer = coor_inpaint_buffer[-buffer_size:]
+            stage_times['inference_s'] += time.perf_counter() - stage_start_time
         
 
     # Write csv file
     pred_dict = inpaint_pred_dict if inpaintnet is not None else tracknet_pred_dict
+    stage_start_time = time.perf_counter()
     write_pred_csv(pred_dict, save_file=out_csv_file)
+    stage_times['write_csv_s'] += time.perf_counter() - stage_start_time
 
     # Write video with predicted coordinates
     if args.output_video:
+        stage_start_time = time.perf_counter()
         write_pred_video(video_file, pred_dict, save_file=out_video_file, traj_len=args.traj_len)
+        stage_times['video_merge_s'] += time.perf_counter() - stage_start_time
+
+    runtime_s = time.perf_counter() - run_start_time
+
+    if not args.no_experiment_log:
+        append_prediction_log(args, runtime_s, stage_times, sys.argv)
 
     print('Done.')

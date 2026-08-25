@@ -9,6 +9,7 @@ import pandas as pd
 
 from collections import deque
 from PIL import Image, ImageDraw
+from tqdm import tqdm
 from model import TrackNet, InpaintNet
 
 # Global variables
@@ -213,14 +214,18 @@ def generate_frames(video_file):
 
     # Get camera parameters
     cap = cv2.VideoCapture(video_file)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_list = []
     success = True
 
     # Sample frames until video end
-    while success:
-        success, frame = cap.read()
-        if success:
-            frame_list.append(frame)
+    with tqdm(total=frame_count if frame_count > 0 else None, desc='generate_frames_s') as pbar:
+        while success:
+            success, frame = cap.read()
+            if success:
+                frame_list.append(frame)
+                pbar.update(1)
+    cap.release()
             
     return frame_list
 
@@ -290,31 +295,34 @@ def write_pred_video(video_file, pred_dict, save_file, traj_len=8, label_df=None
     # Draw label and prediction trajectory
     #for i, frame in enumerate(frame_list):
     i = 0
-    while True:
-        success, frame = cap.read()
-        if not success:
-            break
-        
-        # Check capacity of queue
-        if len(pred_queue) >= traj_len:
-            pred_queue.pop()
-        if label_df is not None and len(gt_queue) >= traj_len:
-            gt_queue.pop()
-        
-        # Push ball coordinates for each frame
-        if label_df is not None:
-            gt_queue.appendleft([x[i], y[i]]) if vis[i] and i < len(label_df) else gt_queue.appendleft(None)
-        pred_queue.appendleft([x_pred[i], y_pred[i]]) if vis_pred[i] else pred_queue.appendleft(None)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    with tqdm(total=frame_count if frame_count > 0 else None, desc='video_merge_s') as pbar:
+        while True:
+            success, frame = cap.read()
+            if not success:
+                break
+            
+            # Check capacity of queue
+            if len(pred_queue) >= traj_len:
+                pred_queue.pop()
+            if label_df is not None and len(gt_queue) >= traj_len:
+                gt_queue.pop()
+            
+            # Push ball coordinates for each frame
+            if label_df is not None:
+                gt_queue.appendleft([x[i], y[i]]) if vis[i] and i < len(label_df) else gt_queue.appendleft(None)
+            pred_queue.appendleft([x_pred[i], y_pred[i]]) if vis_pred[i] else pred_queue.appendleft(None)
 
-        # Draw ground truth trajectory if exists
-        if label_df is not None:
-            frame = draw_traj(frame, gt_queue, color='red')
-        
-        # Draw prediction trajectory
-        frame = draw_traj(frame, pred_queue, color='yellow')
+            # Draw ground truth trajectory if exists
+            if label_df is not None:
+                frame = draw_traj(frame, gt_queue, color='red')
+            
+            # Draw prediction trajectory
+            frame = draw_traj(frame, pred_queue, color='yellow')
 
-        out.write(frame)
-        i+=1
+            out.write(frame)
+            i+=1
+            pbar.update(1)
 
     out.release()
     cap.release()

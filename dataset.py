@@ -765,8 +765,9 @@ class Video_IterableDataset(IterableDataset):
         else:
             sample_step = 1
         
+        frame_indices = range(start_frame, end_frame, sample_step)
         frame_list = []
-        for i in range(start_frame, end_frame, sample_step):
+        for i in tqdm(frame_indices, desc='median_s'):
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, i)
             success, frame = self.cap.read()
             if not success:
