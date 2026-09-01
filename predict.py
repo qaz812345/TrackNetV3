@@ -112,14 +112,22 @@ if __name__ == '__main__':
         os.makedirs(args.save_dir)
     
     # Load model
-    tracknet_ckpt = torch.load(args.tracknet_file)
+    # Load checkpoint tensors onto the selected inference device.
+    # This allows CUDA-trained checkpoints to be restored on MPS or CPU systems.
+    tracknet_ckpt = torch.load(
+        args.tracknet_file,
+        map_location=device
+    )
     tracknet_seq_len = tracknet_ckpt['param_dict']['seq_len']
     bg_mode = tracknet_ckpt['param_dict']['bg_mode']
     tracknet = get_model('TrackNet', tracknet_seq_len, bg_mode).to(device)
     tracknet.load_state_dict(tracknet_ckpt['model'])
 
     if args.inpaintnet_file:
-        inpaintnet_ckpt = torch.load(args.inpaintnet_file)
+        inpaintnet_ckpt = torch.load(
+            args.inpaintnet_file,
+            map_location=device
+        )
         inpaintnet_seq_len = inpaintnet_ckpt['param_dict']['seq_len']
         inpaintnet = get_model('InpaintNet').to(device)
         inpaintnet.load_state_dict(inpaintnet_ckpt['model'])
