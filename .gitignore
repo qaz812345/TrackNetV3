@@ -16,4 +16,3 @@ model_compare.py
 predict_old.py
 *.sh
 *.mp4
-/venv
