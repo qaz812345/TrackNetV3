@@ -31,7 +31,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         HEIGHT=HEIGHT,
         WIDTH=WIDTH,
         SIGMA=SIGMA,
-        median=None
+        median=None,
+        use_fixed_sigma=True
     ):
         """ Initialize the dataset
 
@@ -66,6 +67,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 WIDTH (int): Width of the image for input.
                 SIGMA (int): Sigma of the Gaussian heatmap which control the label size.
                 median (numpy.ndarray): Median image
+                use_fixed_sigma (bool): If True, always use SIGMA parameter. If False, use Radius column from CSV.
         """
 
         assert split in ['train', 'test', 'val'], f'Invalid split: {split}, should be train, test or val'
@@ -79,6 +81,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         # Gaussian heatmap parameters
         self.mag = 1
         self.sigma = SIGMA
+        self.use_fixed_sigma = use_fixed_sigma
 
         self.root_dir = root_dir
         self.split = split if rally_dir is None else self._get_split(rally_dir)
@@ -179,6 +182,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
             frame_file = np.array([]).reshape(0, self.seq_len)
             coor = np.array([], dtype=np.float32).reshape(0, self.seq_len, 2)
             vis = np.array([], dtype=np.float32).reshape(0, self.seq_len)
+            radius = np.array([], dtype=np.float32).reshape(0, self.seq_len)
 
             # Generate input sequences from each rally
             for rally_i, rally_dir in tqdm(self.rally_dict['i2p'].items()):
@@ -187,8 +191,9 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 frame_file = np.concatenate((frame_file, data_dict['frame_file']), axis=0)
                 coor = np.concatenate((coor, data_dict['coor']), axis=0)
                 vis = np.concatenate((vis, data_dict['vis']), axis=0)
+                radius = np.concatenate((radius, data_dict['radius']), axis=0)
             
-            np.savez(file_name, id=id, frame_file=frame_file, coor=coor, vis=vis)
+            np.savez(file_name, id=id, frame_file=frame_file, coor=coor, vis=vis, radius=radius)
         else:
             id = np.array([], dtype=np.int32).reshape(0, self.seq_len, 2)
             coor = np.array([], dtype=np.float32).reshape(0, self.seq_len, 2)
@@ -224,22 +229,35 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 csv_file = os.path.join(match_dir, 'corrected_csv', f'{rally_id}_ball.csv')
             else:
                 csv_file = os.path.join(match_dir, 'csv', f'{rally_id}_ball.csv')
-            
+
             assert os.path.exists(csv_file), f'{csv_file} does not exist.'
             label_df = pd.read_csv(csv_file, encoding='utf8').sort_values(by='Frame').fillna(0)
 
             f_file = np.array([os.path.join(rally_dir, f'{f_id}.{IMG_FORMAT}') for f_id in label_df['Frame']])
             x, y, v = np.array(label_df['X']), np.array(label_df['Y']), np.array(label_df['Visibility'])
 
+            # Read radius if available in CSV otherwise use default SIGMA
+            if 'Radius' in label_df.columns:
+                r = np.array(label_df['Radius'] / 2) 
+            else:
+                r = np.full(len(x), self.sigma)
+
+            # Read difficulty if available in CSV
+            if 'Difficulty' in label_df.columns:
+                d = np.array(label_df['Difficulty'])
+            else:
+                d = np.full(len(x), 'hard')
+
             id = np.array([], dtype=np.int32).reshape(0, self.seq_len, 2)
             frame_file = np.array([]).reshape(0, self.seq_len)
             coor = np.array([], dtype=np.float32).reshape(0, self.seq_len, 2)
             vis = np.array([], dtype=np.float32).reshape(0, self.seq_len)
+            radius = np.array([], dtype=np.float32).reshape(0, self.seq_len)
             
             # Sliding on the frame sequence
             last_idx = -1
             for i in range(0, len(f_file), self.sliding_step):
-                tmp_idx, tmp_frames, tmp_coor, tmp_vis = [], [], [], []
+                tmp_idx, tmp_frames, tmp_coor, tmp_vis, tmp_radius, tmp_difficulty = [], [], [], [], [], []
                 # Construct a single input sequence
                 for f in range(self.seq_len):
                     if i+f < len(f_file):
@@ -247,6 +265,8 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                         tmp_frames.append(f_file[i+f])
                         tmp_coor.append((x[i+f], y[i+f]))
                         tmp_vis.append(v[i+f])
+                        tmp_radius.append(r[i+f])
+                        tmp_difficulty.append(d[i+f])
                         last_idx = i+f
                     else:
                         # Padding the last sequence if imcompleted
@@ -255,19 +275,30 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                             tmp_frames.append(f_file[last_idx])
                             tmp_coor.append((x[last_idx], y[last_idx]))
                             tmp_vis.append(v[last_idx])
+                            tmp_radius.append(r[last_idx])
+                            tmp_difficulty.append(d[last_idx])
                         else:
                             break
-                
-                # Append the input sequence
+
+                # Append the input sequence only if it contains at least one "hard" frame
                 if len(tmp_frames) == self.seq_len:
                     assert len(tmp_frames) == len(tmp_coor) == len(tmp_vis),\
-                    f'Length of frames, coordinates and visibilities are not equal.'
+-                    f'Length of frames, coordinates and visibilities are not equal.'
+                    # Filter: skip sequences with all "easy" frames
+                    # Filter if "easy" frames in boundaries
+                    has_hard_frame = any(diff == 'hard' for diff in tmp_difficulty)
+                    if not has_hard_frame or tmp_difficulty[-1] == 'easy' or tmp_difficulty[0] == 'easy':
+                        continue  # Skip this sequence
+
+                    assert len(tmp_frames) == len(tmp_coor) == len(tmp_vis) == len(tmp_radius),\
+                    f'Length of frames, coordinates, visibilities and radius are not equal.'
                     id = np.concatenate((id, [tmp_idx]), axis=0)
                     frame_file = np.concatenate((frame_file, [tmp_frames]), axis=0)
                     coor = np.concatenate((coor, [tmp_coor]), axis=0)
                     vis = np.concatenate((vis, [tmp_vis]), axis=0)
-            
-            return dict(id=id, frame_file=frame_file, coor=coor, vis=vis)
+                    radius = np.concatenate((radius, [tmp_radius]), axis=0)
+
+            return dict(id=id, frame_file=frame_file, coor=coor, vis=vis, radius=radius)
         else:
             # Read predicted csv file
             pred_csv_file = os.path.join(match_dir, 'predicted_csv', f'{rally_id}_ball.csv')
@@ -398,14 +429,18 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
         return dict(id=id, coor_pred=coor_pred, pred_vis=pred_vis, inpaint_mask=inpaint_mask),\
                dict(img_scaler=self.pred_dict['Img_scaler'], img_shape=self.pred_dict['Img_shape']) 
     
-    def _get_heatmap(self, cx, cy):
-        """ Generate a Gaussian heatmap centered at (cx, cy). """
+    def _get_heatmap(self, cx, cy, radius=None):
+        """ Generate a Gaussian heatmap centered at (cx, cy) with given radius. """
         if cx == cy == 0:
             return np.zeros((1, self.HEIGHT, self.WIDTH))
+
+        # Use provided radius or default to self.sigma
+        sigma = radius if radius is not None and not self.use_fixed_sigma else self.sigma
+
         x, y = np.meshgrid(np.linspace(1, self.WIDTH, self.WIDTH), np.linspace(1, self.HEIGHT, self.HEIGHT))
         heatmap = ((y - (cy + 1))**2) + ((x - (cx + 1))**2)
-        heatmap[heatmap <= self.sigma**2] = 1.
-        heatmap[heatmap > self.sigma**2] = 0.
+        heatmap[heatmap <= sigma**2] = 1.
+        heatmap[heatmap > sigma**2] = 0.
         heatmap = heatmap * self.mag
         return heatmap.reshape(1, self.HEIGHT, self.WIDTH)
 
@@ -478,6 +513,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 frame_file = self.data_dict['frame_file'][idx] # (L,)
                 coor = self.data_dict['coor'][idx] # (L, 2)
                 vis = self.data_dict['vis'][idx] # (L,)
+                rad = self.data_dict['radius'][idx] # (L,) - radius for each frame
                 w, h = self.img_config['img_shape'][data_idx[0][0]]
                 w_scaler, h_scaler = self.img_config['img_scaler'][data_idx[0][0]]
 
@@ -511,7 +547,12 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
 
                 prev_coor = coor[0]
                 prev_vis = vis[0]
-                prev_heatmap = self._get_heatmap(int(coor[0][0]/ w_scaler), int(coor[0][1]/ h_scaler))
+                prev_radius = rad[0] / w_scaler  # Scale radius to heatmap dimensions
+                # If not visible, force coordinates to (0, 0) for zero heatmap
+                if prev_vis:
+                    prev_heatmap = self._get_heatmap(int(coor[0][0]/ w_scaler), int(coor[0][1]/ h_scaler), radius=prev_radius)
+                else:
+                    prev_heatmap = self._get_heatmap(0, 0, radius=prev_radius)
                 
                 # Keep first dimension as timestamp for resample
                 if self.bg_mode == 'subtract':
@@ -546,6 +587,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                     inter_img = prev_img * lamb + cur_img * (1 - lamb)
 
                     # Linear interpolation
+                    cur_radius = rad[i] / w_scaler  # Scale radius to heatmap dimensions
                     if vis[i] == 0:
                         inter_coor = prev_coor
                         inter_vis = prev_vis
@@ -554,12 +596,20 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                     elif prev_vis == 0 or math.sqrt(pow(prev_coor[0]-coor[i][0], 2)+pow(prev_coor[1]-coor[i][1], 2)) < 10:
                         inter_coor = coor[i]
                         inter_vis = vis[i]
-                        cur_heatmap = self._get_heatmap(int(inter_coor[0]/ w_scaler), int(inter_coor[1]/ h_scaler))
+                        # If not visible, force coordinates to (0, 0) for zero heatmap
+                        if vis[i]:
+                            cur_heatmap = self._get_heatmap(int(inter_coor[0]/ w_scaler), int(inter_coor[1]/ h_scaler), radius=cur_radius)
+                        else:
+                            cur_heatmap = self._get_heatmap(0, 0, radius=cur_radius)
                         inter_heatmap = cur_heatmap
                     else:
                         inter_coor = coor[i]
                         inter_vis = vis[i]
-                        cur_heatmap = self._get_heatmap(int(coor[i][0]/ w_scaler), int(coor[i][1]/ h_scaler))
+                        # If not visible, force coordinates to (0, 0) for zero heatmap
+                        if vis[i]:
+                            cur_heatmap = self._get_heatmap(int(coor[i][0]/ w_scaler), int(coor[i][1]/ h_scaler), radius=cur_radius)
+                        else:
+                            cur_heatmap = self._get_heatmap(0, 0, radius=cur_radius)
                         inter_heatmap = prev_heatmap * lamb + cur_heatmap * (1 - lamb)
                     
                     tmp_coor = np.concatenate((tmp_coor, inter_coor.reshape(1, -1), coor[i].reshape(1, -1)), axis=0)
@@ -597,6 +647,7 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                 frame_file = self.data_dict['frame_file'][idx]
                 coor = self.data_dict['coor'][idx]
                 vis = self.data_dict['vis'][idx]
+                rad = self.data_dict['radius'][idx]  # radius for each frame
                 w, h = self.img_config['img_shape'][data_idx[0][0]]
                 w_scaler, h_scaler = self.img_config['img_scaler'][data_idx[0][0]]
 
@@ -629,7 +680,12 @@ class Shuttlecock_Trajectory_Dataset(Dataset):
                         img = np.array(img.resize(size=(self.WIDTH, self.HEIGHT)))
                         img = np.moveaxis(img, -1, 0)
                     
-                    heatmap = self._get_heatmap(int(coor[i][0]/w_scaler), int(coor[i][1]/h_scaler))
+                    cur_radius = rad[i] / w_scaler  # Scale radius to heatmap dimensions
+                    # If not visible, force coordinates to (0, 0) for zero heatmap
+                    if vis[i]:
+                        heatmap = self._get_heatmap(int(coor[i][0]/w_scaler), int(coor[i][1]/h_scaler), radius=cur_radius)
+                    else:
+                        heatmap = self._get_heatmap(0, 0, radius=cur_radius)
                     frames = np.concatenate((frames, img), axis=0)
                     heatmaps = np.concatenate((heatmaps, heatmap), axis=0)
                 

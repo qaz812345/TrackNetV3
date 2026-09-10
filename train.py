@@ -75,29 +75,33 @@ def train_tracknet(model, optimizer, data_loader, param_dict):
 
     model.train()
     epoch_loss = []
+    accumulation_steps = param_dict['accumulation_steps']
 
     if param_dict['verbose']:
         data_prob = tqdm(train_loader)
     else:
         data_prob = data_loader
-    
+
+    optimizer.zero_grad()
     for step, (_, x, y, c, _) in enumerate(data_prob):
-        optimizer.zero_grad()
         x, y = x.float().cuda(), y.float().cuda()
 
         # Sample mixup
         if param_dict['alpha'] > 0:
             x, y = mixup(x, y, param_dict['alpha'])
-        
+
         y_pred = model(x)
-        loss = WBCELoss(y_pred, y)
-        epoch_loss.append(loss.item())
+        loss = WBCELoss(y_pred, y) / accumulation_steps
+        epoch_loss.append(loss.item() * accumulation_steps)
         loss.backward()
-        optimizer.step()
+
+        if (step + 1) % accumulation_steps == 0 or (step + 1) == len(data_loader):
+            optimizer.step()
+            optimizer.zero_grad()
 
         if param_dict['verbose'] and (step + 1) % display_step == 0:
             data_prob.set_description(f'Training')
-            data_prob.set_postfix(loss=loss.item())
+            data_prob.set_postfix(loss=loss.item() * accumulation_steps)
 
         # Visualize current prediction
         if (step + 1) % display_step == 0:
@@ -138,36 +142,40 @@ def train_inpaintnet(model, optimizer, data_loader, param_dict):
 
     model.train()
     epoch_loss = []
+    accumulation_steps = param_dict['accumulation_steps']
 
     if param_dict['verbose']:
         data_prob = tqdm(data_loader)
     else:
         data_prob = data_loader
 
+    optimizer.zero_grad()
     for step, (_, coor_pred, coor_gt, _, vis_gt, _) in enumerate(data_prob):
-        optimizer.zero_grad()
         coor_pred, coor_gt, vis_gt = coor_pred.float().cuda(), coor_gt.float().cuda(), vis_gt.float().cuda()
 
         # Sample random mask as inpainting mask
         mask = get_random_mask(mask_size=coor_gt.shape[:2], mask_ratio=param_dict['mask_ratio']).cuda() # (N, L, 1)
         inpaint_mask = torch.logical_and(vis_gt, mask).int() # visible and masked area
-        
+
         coor_pred = coor_pred * (1 - inpaint_mask) # masked area is set to 0
         refine_coor = model(coor_pred, inpaint_mask)
 
         # Calculate masked loss
         masked_refine_coor = refine_coor * inpaint_mask
         masked_gt_coor = coor_gt * inpaint_mask
-        loss = nn.MSELoss()(masked_refine_coor, masked_gt_coor)
-        epoch_loss.append(loss.item())
+        loss = nn.MSELoss()(masked_refine_coor, masked_gt_coor) / accumulation_steps
+        epoch_loss.append(loss.item() * accumulation_steps)
 
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1)
-        optimizer.step()
-        
+
+        if (step + 1) % accumulation_steps == 0 or (step + 1) == len(data_loader):
+            optimizer.step()
+            optimizer.zero_grad()
+
         if param_dict['verbose'] and (step + 1) % display_step == 0:
             data_prob.set_description(f'Training')
-            data_prob.set_postfix(loss=loss.item())
+            data_prob.set_postfix(loss=loss.item() * accumulation_steps)
 
         # Visualize current prediction
         if (step + 1) % display_step == 0:
@@ -192,8 +200,11 @@ if __name__ == '__main__':
     parser.add_argument('--mask_ratio', type=float, default=0.3, help='ratio of random mask during training InpaintNet')
     parser.add_argument('--tolerance', type=float, default=4, help='difference tolerance of center distance between prediction and ground truth in input size')
     parser.add_argument('--resume_training', action='store_true', default=False, help='resume training from experiment directory')
+    parser.add_argument('--pretrained_weights', type=str, default='', help='path to pre-trained weights file (e.g., ckpts/TrackNet_best.pt)')
+    parser.add_argument('--use_fixed_sigma', action='store_true', default=False, help='use fixed SIGMA parameter instead of Radius column from CSV')
     parser.add_argument('--seed', type=int, default=13, help='random seed')
     parser.add_argument('--save_dir', type=str, default='exp', help='directory to save the checkpoints and prediction result')
+    parser.add_argument('--effective_batch_size', type=int, default=0, help='effective batch size for gradient accumulation, 0 means disabled')
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--verbose', action='store_true', default=False)
     args = parser.parse_args()
@@ -212,6 +223,10 @@ if __name__ == '__main__':
 
     display_step = 4 if args.debug else 100
     num_workers = args.batch_size if args.batch_size <= 16 else 16
+    effective_batch_size = args.effective_batch_size if args.effective_batch_size > 0 else args.batch_size
+    accumulation_steps = max(1, effective_batch_size // args.batch_size)
+    param_dict['accumulation_steps'] = accumulation_steps
+    print('Gradient accumulation: effective_batch_size={}, batch_size={}, accumulation_steps={}'.format(effective_batch_size, args.batch_size, accumulation_steps))
     
     # Load checkpoint
     if args.resume_training:
@@ -227,8 +242,8 @@ if __name__ == '__main__':
     print(f'Parameters: {param_dict}')
     print(f'Load dataset...')
     data_mode = 'heatmap' if args.model_name == 'TrackNet' else 'coordinate'
-    train_dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=args.seq_len, sliding_step=1, data_mode=data_mode, bg_mode=args.bg_mode, frame_alpha=args.frame_alpha, debug=args.debug)
-    val_dataset = Shuttlecock_Trajectory_Dataset(split='val', seq_len=args.seq_len, sliding_step=args.seq_len, data_mode=data_mode, bg_mode=args.bg_mode, debug=args.debug)
+    train_dataset = Shuttlecock_Trajectory_Dataset(split='train', seq_len=args.seq_len, sliding_step=1, data_mode=data_mode, bg_mode=args.bg_mode, frame_alpha=args.frame_alpha, debug=args.debug, use_fixed_sigma=args.use_fixed_sigma)
+    val_dataset = Shuttlecock_Trajectory_Dataset(split='val', seq_len=args.seq_len, sliding_step=args.seq_len, data_mode=data_mode, bg_mode=args.bg_mode, debug=args.debug, use_fixed_sigma=args.use_fixed_sigma)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=num_workers, drop_last=True, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers, drop_last=False, pin_memory=True)
 
@@ -263,6 +278,17 @@ if __name__ == '__main__':
         max_val_acc = ckpt['max_val_acc']
         print(f'Resume training from epoch {start_epoch}...')
     else:
+        # Load pre-trained weights if provided
+        if args.pretrained_weights and os.path.exists(args.pretrained_weights):
+            print(f'Loading pre-trained weights from {args.pretrained_weights}...')
+            pretrained_ckpt = torch.load(args.pretrained_weights)
+            model.load_state_dict(pretrained_ckpt['model'])
+            print('Pre-trained weights loaded successfully!')
+        elif args.pretrained_weights:
+            print(f'Warning: Pre-trained weights path "{args.pretrained_weights}" not found, training from scratch...')
+        else:
+            print('No pre-trained weights specified, training from scratch...')
+
         max_val_acc = 0.
         start_epoch = 0
         
